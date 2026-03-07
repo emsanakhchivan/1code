@@ -34,6 +34,12 @@ export function getErrorMessage(error: FileLoadError): string {
   }
 }
 
+/** True if path is absolute (Unix / or Windows C:\ / C:/) */
+function isAbsolutePath(path: string): boolean {
+  if (path.startsWith("/")) return true
+  return /^[A-Za-z]:[/\\]/.test(path)
+}
+
 /**
  * Hook to fetch file content from the backend
  * Uses the files.readTextFile procedure with absolute path
@@ -45,9 +51,8 @@ export function useFileContent(
 ): FileContentResult {
   const absolutePath = useMemo(() => {
     if (!projectPath || !filePath) return null
-    return filePath.startsWith("/")
-      ? filePath
-      : `${projectPath}/${filePath}`
+    if (isAbsolutePath(filePath)) return filePath
+    return `${projectPath}/${filePath}`
   }, [projectPath, filePath])
 
   const enabled = !!absolutePath
@@ -69,12 +74,15 @@ export function useFileContent(
   // Compute relative path for matching against file change events
   const relativePath = useMemo(() => {
     if (!projectPath || !filePath) return null
-    if (!filePath.startsWith("/")) return filePath
-    const projectPathWithSep = projectPath.endsWith("/") ? projectPath : `${projectPath}/`
-    if (filePath.startsWith(projectPathWithSep)) {
-      return filePath.slice(projectPathWithSep.length)
+    if (!isAbsolutePath(filePath)) return filePath
+    // Normalize for prefix check (Windows can use \ or /)
+    const nProject = projectPath.replace(/\\/g, "/")
+    const nFile = filePath.replace(/\\/g, "/")
+    const prefix = nProject.endsWith("/") ? nProject : `${nProject}/`
+    if (nFile.startsWith(prefix)) {
+      return nFile.slice(prefix.length)
     }
-    if (filePath === projectPath) return ""
+    if (nFile === nProject) return ""
     return filePath
   }, [projectPath, filePath])
 
