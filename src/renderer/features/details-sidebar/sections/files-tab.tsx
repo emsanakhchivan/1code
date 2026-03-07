@@ -4,10 +4,12 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo, forwardRef, us
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { atom } from "jotai"
 import { HiChevronRight } from "react-icons/hi2"
+import { FolderOpen } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { trpc } from "@/lib/trpc"
 import { UnknownFileIcon } from "@/icons/framework-icons"
+import { FolderIcon } from "@/components/ui/icons"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -50,7 +52,7 @@ export interface FilesTabHandle {
   isAllExpanded: boolean
 }
 
-const INDENT_PX = 12
+const INDENT_PX = 16
 
 // Static noop atom to avoid creating a family entry for "__noop__"
 const noopExpandedAtom = atom<string[] | null, [string[]], void>(
@@ -62,6 +64,11 @@ const noopExpandedAtom = atom<string[] | null, [string[]], void>(
 // Helpers
 // ============================================================================
 
+/** Normalize path to forward slashes (Windows backend may return backslashes) */
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/")
+}
+
 function buildFileTree(
   files: Array<{ path: string; type: "file" | "folder" }>,
 ): FileTreeNode[] {
@@ -71,7 +78,8 @@ function buildFileTree(
   const root: Record<string, Internal> = {}
   for (const file of files) {
     if (file.type !== "file") continue
-    const parts = file.path.split("/")
+    const normalizedPath = normalizePath(file.path)
+    const parts = normalizedPath.split("/")
     let cur = root
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i]!
@@ -208,6 +216,7 @@ const TreeNode = memo(function TreeNode({
   const FileIcon = !isFolder
     ? (getFileIconByExtension(node.name) ?? UnknownFileIcon)
     : null
+  const FolderIconComponent = isFolder ? (isExpanded ? FolderOpen : FolderIcon) : null
 
   return (
     <>
@@ -227,23 +236,34 @@ const TreeNode = memo(function TreeNode({
             onMouseDown={handleMouseDown}
             onClick={handleClick}
             className={cn(
-              "flex items-center h-[22px] w-full cursor-pointer select-none",
+              "flex items-center h-[22px] w-full cursor-pointer select-none rounded-sm",
+              isFolder && isExpanded && "bg-muted/30",
               isFocused
                 ? "bg-accent text-accent-foreground"
                 : isActive
                   ? "bg-accent/50 text-accent-foreground"
                   : "text-foreground hover:bg-accent/50",
             )}
-            style={{ paddingLeft: level * INDENT_PX }}
+            style={{ paddingLeft: 8 + level * INDENT_PX }}
           >
-            <span className="w-4 h-full flex items-center justify-center shrink-0">
+            <span className="w-6 h-full flex items-center gap-0.5 shrink-0">
               {isFolder ? (
-                <HiChevronRight
-                  className={cn(
-                    "size-2.5 text-muted-foreground transition-transform duration-150",
-                    isExpanded && "rotate-90",
+                <>
+                  <HiChevronRight
+                    className={cn(
+                      "size-2.5 text-muted-foreground transition-transform duration-150 shrink-0",
+                      isExpanded && "rotate-90",
+                    )}
+                  />
+                  {FolderIconComponent && (
+                    <FolderIconComponent
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        isExpanded ? "text-amber-500/90 dark:text-amber-400/90" : "text-muted-foreground",
+                      )}
+                    />
                   )}
-                />
+                </>
               ) : (
                 FileIcon && <FileIcon className="size-3.5 text-muted-foreground" />
               )}
@@ -327,10 +347,9 @@ export const FilesTab = memo(forwardRef<FilesTabHandle, FilesTabProps>(function 
   // activePath = file currently open in viewer (secondary highlight), derived from prop
   const activePath = useMemo(() => {
     if (!currentViewerFilePath || !worktreePath) return null
-    const prefix = worktreePath + "/"
-    return currentViewerFilePath.startsWith(prefix)
-      ? currentViewerFilePath.slice(prefix.length)
-      : null
+    const nCurrent = normalizePath(currentViewerFilePath)
+    const nPrefix = normalizePath(worktreePath) + "/"
+    return nCurrent.startsWith(nPrefix) ? nCurrent.slice(nPrefix.length) : null
   }, [currentViewerFilePath, worktreePath])
 
   // focusedPath = keyboard/click cursor (primary highlight)
