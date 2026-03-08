@@ -69,6 +69,13 @@ function normalizePath(path: string): string {
   return path.replace(/\\/g, "/")
 }
 
+/** Workspace folder display name (e.g. "project1" from "C:/documents/project1") */
+function getWorkspaceName(worktreePath: string): string {
+  const n = normalizePath(worktreePath)
+  const segments = n.split("/").filter(Boolean)
+  return segments.length > 0 ? segments[segments.length - 1]! : "Workspace"
+}
+
 function buildFileTree(
   files: Array<{ path: string; type: "file" | "folder" }>,
 ): FileTreeNode[] {
@@ -126,8 +133,14 @@ function collectAllFolderPaths(nodes: FileTreeNode[]): Set<string> {
   return s
 }
 
+/** Top-level folder paths to expand on first visit. With workspace root, includes "." and its folder children. */
 function collectRootFolderPaths(nodes: FileTreeNode[]): Set<string> {
   const s = new Set<string>()
+  if (nodes.length === 1 && nodes[0]!.path === "." && nodes[0]!.children?.length) {
+    s.add(".")
+    for (const c of nodes[0]!.children) if (c.type === "folder") s.add(c.path)
+    return s
+  }
   for (const n of nodes) if (n.type === "folder") s.add(n.path)
   return s
 }
@@ -323,16 +336,20 @@ const TreeNode = memo(function TreeNode({
           <ContextMenuItem onClick={() => onContextAction("copy-relative", node)}>
             Copy Relative Path
           </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => onContextAction("rename", node)}>
-            Rename...
-          </ContextMenuItem>
-          <ContextMenuItem
-            onClick={() => onContextAction("delete", node)}
-            className="data-[highlighted]:bg-red-500/15 data-[highlighted]:text-red-400"
-          >
-            Delete
-          </ContextMenuItem>
+          {node.path !== "." && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem onClick={() => onContextAction("rename", node)}>
+                Rename...
+              </ContextMenuItem>
+              <ContextMenuItem
+                onClick={() => onContextAction("delete", node)}
+                className="data-[highlighted]:bg-red-500/15 data-[highlighted]:text-red-400"
+              >
+                Delete
+              </ContextMenuItem>
+            </>
+          )}
         </ContextMenuContent>
       </ContextMenu>
 
@@ -434,9 +451,12 @@ export const FilesTab = memo(forwardRef<FilesTabHandle, FilesTabProps>(function 
   )
 
   const tree = useMemo(() => {
-    if (!allFiles) return []
-    return buildFileTree(allFiles)
-  }, [allFiles])
+    if (!allFiles || !worktreePath) return []
+    const raw = buildFileTree(allFiles)
+    if (raw.length === 0) return []
+    const workspaceName = getWorkspaceName(worktreePath)
+    return [{ id: ".", name: workspaceName, type: "folder" as const, path: ".", children: raw }]
+  }, [allFiles, worktreePath])
 
   // Auto-expand root folders on first visit (storedExpanded === null means never set)
   useEffect(() => {
@@ -511,7 +531,9 @@ export const FilesTab = memo(forwardRef<FilesTabHandle, FilesTabProps>(function 
   // ---- Context Menu Actions ----
 
   const toAbsolute = useCallback((relativePath: string) => {
-    return worktreePath ? worktreePath + "/" + relativePath : relativePath
+    if (!worktreePath) return relativePath
+    if (relativePath === ".") return worktreePath
+    return worktreePath + "/" + relativePath
   }, [worktreePath])
 
   const invalidateFiles = useCallback(() => {
