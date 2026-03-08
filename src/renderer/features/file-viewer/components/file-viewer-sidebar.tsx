@@ -50,7 +50,7 @@ import {
   fileViewerDisplayModeAtom,
   type FileViewerDisplayMode,
 } from "../../agents/atoms"
-import { useFileContent, getErrorMessage } from "../hooks/use-file-content"
+import { useFileContent, getErrorMessage, isAbsolutePath } from "../hooks/use-file-content"
 import { getMonacoLanguage, getFileViewerType } from "../utils/language-map"
 import { getFileName } from "../utils/file-utils"
 import { defaultEditorOptions, getMonacoTheme, registerMonacoTheme } from "./monaco-config"
@@ -207,9 +207,9 @@ function CodeViewerHeader({
   const openInEditorHotkey = useResolvedHotkeyDisplay("open-file-in-editor")
 
   const handleOpenInEditor = useCallback(() => {
-    const absolutePath = filePath.startsWith("/") ? filePath : undefined
-    if (absolutePath) {
-      openInAppMutation.mutate({ path: absolutePath, app: preferredEditor })
+    // Handle Windows absolute paths (C:\...) and Unix absolute paths (/...)
+    if (isAbsolutePath(filePath)) {
+      openInAppMutation.mutate({ path: filePath, app: preferredEditor })
     }
   }, [filePath, preferredEditor, openInAppMutation])
 
@@ -495,9 +495,9 @@ function CodeViewer({
   // Handle ⌘⇧O hotkey to open current file in external editor
   useEffect(() => {
     const handler = () => {
-      const absolutePath = filePath.startsWith("/") ? filePath : undefined
-      if (absolutePath) {
-        openInAppMutation.mutate({ path: absolutePath, app: preferredEditor })
+      // Handle Windows absolute paths (C:\...) and Unix absolute paths (/...)
+      if (isAbsolutePath(filePath)) {
+        openInAppMutation.mutate({ path: filePath, app: preferredEditor })
       }
     }
     window.addEventListener("open-file-in-editor", handler)

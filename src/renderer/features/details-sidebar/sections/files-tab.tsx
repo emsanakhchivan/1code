@@ -487,7 +487,10 @@ export const FilesTab = memo(forwardRef<FilesTabHandle, FilesTabProps>(function 
   const activateFile = useCallback(
     (relativePath: string) => {
       if (!worktreePath) return
-      onSelectFile(worktreePath + "/" + relativePath)
+      // Normalize paths to handle Windows backslashes
+      const normalizedWorktree = worktreePath.replace(/\\/g, "/")
+      const normalizedRelative = relativePath.replace(/\\/g, "/")
+      onSelectFile(`${normalizedWorktree}/${normalizedRelative}`)
     },
     [worktreePath, onSelectFile],
   )

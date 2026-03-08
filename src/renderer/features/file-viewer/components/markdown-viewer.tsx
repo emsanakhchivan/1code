@@ -43,6 +43,7 @@ const FILE_VIEWER_MODES = [
 ]
 import { defaultEditorOptions, getMonacoTheme } from "./monaco-config"
 import { getFileName } from "../utils/file-utils"
+import { isAbsolutePath } from "../hooks/use-file-content"
 
 interface MarkdownViewerProps {
   filePath: string
@@ -67,7 +68,12 @@ export function MarkdownViewer({
   }, [])
 
   const absolutePath = useMemo(() => {
-    return filePath.startsWith("/") ? filePath : `${projectPath}/${filePath}`
+    // Handle Windows absolute paths (C:\...) and Unix absolute paths (/...)
+    if (isAbsolutePath(filePath)) return filePath
+    // Normalize paths to use forward slashes for consistency
+    const normalizedProject = projectPath.replace(/\\/g, "/")
+    const normalizedFile = filePath.replace(/\\/g, "/")
+    return `${normalizedProject}/${normalizedFile}`
   }, [filePath, projectPath])
 
   const { data, isLoading, error, refetch } = trpc.files.readTextFile.useQuery(
@@ -81,11 +87,16 @@ export function MarkdownViewer({
   }, [refetch])
 
   const relativePath = useMemo(() => {
-    if (!filePath.startsWith("/")) return filePath
-    if (filePath.startsWith(projectPath)) {
-      return filePath.slice(projectPath.length + 1)
+    // Normalize paths for comparison
+    const normalizedProject = projectPath.replace(/\\/g, "/")
+    const normalizedFile = filePath.replace(/\\/g, "/")
+    // If already relative, return as-is
+    if (!isAbsolutePath(normalizedFile)) return normalizedFile
+    // If absolute and starts with project path, extract relative portion
+    if (normalizedFile.startsWith(normalizedProject + "/")) {
+      return normalizedFile.slice(normalizedProject.length + 1)
     }
-    return filePath
+    return normalizedFile
   }, [projectPath, filePath])
 
   trpc.files.watchChanges.useSubscription(
@@ -233,9 +244,9 @@ function Header({
   const openInEditorHotkey = useResolvedHotkeyDisplay("open-in-editor")
 
   const handleOpenInEditor = useCallback(() => {
-    const absolutePath = filePath.startsWith("/") ? filePath : undefined
-    if (absolutePath) {
-      openInAppMutation.mutate({ path: absolutePath, app: preferredEditor })
+    // Handle Windows absolute paths (C:\...) and Unix absolute paths (/...)
+    if (isAbsolutePath(filePath)) {
+      openInAppMutation.mutate({ path: filePath, app: preferredEditor })
     }
   }, [filePath, preferredEditor, openInAppMutation])
 

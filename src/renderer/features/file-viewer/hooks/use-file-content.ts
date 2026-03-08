@@ -35,7 +35,7 @@ export function getErrorMessage(error: FileLoadError): string {
 }
 
 /** True if path is absolute (Unix / or Windows C:\ / C:/) */
-function isAbsolutePath(path: string): boolean {
+export function isAbsolutePath(path: string): boolean {
   if (path.startsWith("/")) return true
   return /^[A-Za-z]:[/\\]/.test(path)
 }
