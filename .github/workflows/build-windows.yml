@@ -1,0 +1,49 @@
+# Windows build – Visual Studio sadece GitHub runner'da gerekir, bilgisayarında kurulu olması gerekmez.
+# Push sonrası Actions sekmesinden artifact olarak installer/portable indirebilirsin.
+name: Build Windows
+
+on:
+  push:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          # Runner'da VS var; rebuild çalışsın
+          SKIP_NATIVE_REBUILD: ""
+
+      - name: Download Claude binary (Windows x64)
+        run: bun run claude:download
+        env:
+          # Mevcut platform = Windows
+          CI: true
+
+      - name: Download Codex binary (Windows x64)
+        run: bun run codex:download
+
+      - name: Build app
+        run: bun run build
+
+      - name: Package Windows (NSIS + portable)
+        run: bun run package:win
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/*-portable.exe
