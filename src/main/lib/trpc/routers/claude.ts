@@ -837,12 +837,54 @@ export const claudeRouter = router({
         let lastChunkType = ""
         // Shared sessionId for cleanup to save on abort
         let currentSessionId: string | null = null
+
+        // Track if observable is still active (not unsubscribed)
+        // MUST be defined before resetInactivityTimer since it's used inside the callback
+        let isObservableActive = true
+
         console.log(
           `[SD] M:START sub=${subId} stream=${streamId.slice(-8)} mode=${input.mode}`,
         )
 
-        // Track if observable is still active (not unsubscribed)
-        let isObservableActive = true
+        // Stream inactivity timeout - aborts if no messages received for 5 minutes
+        // This handles proxy timeouts and silent connection drops
+        const STREAM_INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
+        let inactivityTimer: ReturnType<typeof setTimeout> | null = null
+        let lastMessageTime = Date.now()
+        let timerStarted = false
+
+        const resetInactivityTimer = () => {
+          if (inactivityTimer) clearTimeout(inactivityTimer)
+          lastMessageTime = Date.now()
+          timerStarted = true
+          inactivityTimer = setTimeout(() => {
+            // Double-check conditions to prevent race conditions
+            if (!abortController.signal.aborted && isObservableActive && timerStarted) {
+              const timeSinceLastMessage = Date.now() - lastMessageTime
+              console.log(
+                `[SD] M:INACTIVITY_TIMEOUT sub=${subId} lastMsg=${(timeSinceLastMessage / 1000).toFixed(0)}s ago`,
+              )
+              // Mark timer as stopped before aborting to prevent double-cleanup
+              timerStarted = false
+              abortController.abort()
+              safeEmit({
+                type: "error",
+                errorText:
+                  "Stream timeout - no activity for 5 minutes. This may be caused by a proxy timeout. Consider increasing your proxy's connection/read timeout settings.",
+              } as UIMessageChunk)
+              safeEmit({ type: "finish" } as UIMessageChunk)
+              safeComplete()
+            }
+          }, STREAM_INACTIVITY_TIMEOUT_MS)
+        }
+
+        const clearInactivityTimer = () => {
+          if (inactivityTimer) {
+            clearTimeout(inactivityTimer)
+            inactivityTimer = null
+            timerStarted = false
+          }
+        }
 
         // Helper to safely emit (no-op if already unsubscribed)
         const safeEmit = (chunk: UIMessageChunk) => {
@@ -2052,7 +2094,14 @@ ${prompt}
               }
 
               try {
+                // Start inactivity timer when stream begins - NOT waiting for first message
+                // This catches cases where the stream never emits any messages
+                resetInactivityTimer()
+
                 for await (const msg of stream) {
+                  // Reset inactivity timer on each message - prevents false timeouts on long operations
+                  resetInactivityTimer()
+
                   if (abortController.signal.aborted) {
                     if (isUsingOllama)
                       console.log(`[Ollama] Stream aborted by user`)
@@ -2732,6 +2781,7 @@ ${prompt}
             safeEmit({ type: "finish" } as UIMessageChunk)
             safeComplete()
           } finally {
+            clearInactivityTimer()
             activeSessions.delete(input.subChatId)
           }
         })()
@@ -2743,6 +2793,7 @@ ${prompt}
           )
           isObservableActive = false // Prevent emit after unsubscribe
           abortController.abort()
+          clearInactivityTimer()
           activeSessions.delete(input.subChatId)
           clearPendingApprovals("Session ended.", input.subChatId)
 
