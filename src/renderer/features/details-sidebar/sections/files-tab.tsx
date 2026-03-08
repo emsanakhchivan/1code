@@ -197,10 +197,14 @@ const TreeNode = memo(function TreeNode({
     }
   }, [isFocused])
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    // Prevent this row from stealing DOM focus from the tree container
-    e.preventDefault()
-  }, [])
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      // For file rows: do NOT preventDefault so native drag can start
+      // For folder rows: prevent this row from stealing DOM focus from the tree container
+      if (isFolder) e.preventDefault()
+    },
+    [isFolder],
+  )
 
   const handleClick = useCallback(() => {
     onFocus(node.path)
@@ -212,6 +216,25 @@ const TreeNode = memo(function TreeNode({
     // Ensure the tree container has DOM focus so keyboard navigation works
     treeRef.current?.focus()
   }, [isFolder, onToggleExpand, onActivate, onFocus, node.path, treeRef])
+
+  const handleDragStart = useCallback(
+    (e: React.DragEvent) => {
+      if (isFolder) return
+      e.dataTransfer.effectAllowed = "copy"
+      e.dataTransfer.setData(
+        "application/x-21st-file-mention",
+        JSON.stringify({
+          id: `file:local:${node.path}`,
+          label: node.name,
+          path: node.path,
+          type: "file",
+          repository: "local",
+        }),
+      )
+      e.dataTransfer.setData("text/plain", node.path)
+    },
+    [isFolder, node.path, node.name],
+  )
 
   const FileIcon = !isFolder
     ? (getFileIconByExtension(node.name) ?? UnknownFileIcon)
@@ -225,14 +248,17 @@ const TreeNode = memo(function TreeNode({
           asChild
           onPointerDown={(e) => {
             // Only allow right-click (context menu) through.
-            // For left-click, prevent ContextMenuTrigger from stealing focus.
-            if (e.button !== 2) e.preventDefault()
+            // For left-click on folder rows, prevent ContextMenuTrigger from stealing focus.
+            // For file rows, do NOT preventDefault so drag can start.
+            if (e.button !== 2 && isFolder) e.preventDefault()
           }}
         >
           <div
             ref={rowRef}
             role="treeitem"
             aria-expanded={isFolder ? isExpanded : undefined}
+            draggable={!isFolder}
+            onDragStart={handleDragStart}
             onMouseDown={handleMouseDown}
             onClick={handleClick}
             className={cn(

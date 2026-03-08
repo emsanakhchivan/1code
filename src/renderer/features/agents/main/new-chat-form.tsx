@@ -1463,6 +1463,36 @@ export function NewChatForm({
     async (e: React.DragEvent) => {
       e.preventDefault()
       setIsDragOver(false)
+
+      // Sidebar Files tab: drag from file tree drops custom payload (path only, no File objects)
+      const sidebarPayload = e.dataTransfer.getData("application/x-21st-file-mention")
+      if (sidebarPayload) {
+        try {
+          const payload = JSON.parse(sidebarPayload) as {
+            id: string
+            label: string
+            path: string
+            type: string
+            repository: string
+          }
+          if (payload.id && payload.label) {
+            editorRef.current?.insertMention({
+              id: payload.id,
+              label: payload.label,
+              path: payload.path,
+              repository: payload.repository ?? "local",
+              type: (payload.type as "file" | "folder") || "file",
+            })
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => editorRef.current?.focus())
+            })
+          }
+        } catch {
+          // Ignore malformed payload
+        }
+        return
+      }
+
       const droppedFiles = Array.from(e.dataTransfer.files)
 
       // Separate images from other files
