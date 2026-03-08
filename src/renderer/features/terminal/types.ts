@@ -20,6 +20,8 @@ export interface TerminalProps {
   tabId?: string
   initialCommands?: string[]
   initialCwd?: string
+  /** User-selected shell type for this terminal */
+  shellType?: TerminalShellType
 }
 
 export interface TerminalStreamEvent {
@@ -28,6 +30,9 @@ export interface TerminalStreamEvent {
   exitCode?: number
   signal?: number
 }
+
+/** Shell type for terminal instances (matches backend) */
+export type TerminalShellType = "bash" | "powershell" | "cmd" | "zsh"
 
 /**
  * Represents a terminal instance in the multi-terminal system.
@@ -42,4 +47,6 @@ export interface TerminalInstance {
   name: string
   /** Creation timestamp */
   createdAt: number
+  /** User-selected shell type for this terminal */
+  shellType?: TerminalShellType
 }

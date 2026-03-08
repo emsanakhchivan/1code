@@ -129,9 +129,13 @@ export function createTerminalInstance(
   console.log("[Terminal:create] Step 5: Loading renderer")
   const renderer = loadRenderer(xterm)
 
-  // Debug: Check dimensions after renderer
-  const coreAfter = (xterm as unknown as { _core?: { _renderService?: { dimensions?: unknown } } })._core
-  console.log("[Terminal:create] After renderer - dimensions:", coreAfter?._renderService?.dimensions)
+  // Debug: Check dimensions after renderer (safe - _renderService may not be ready yet)
+  try {
+    const coreAfter = (xterm as unknown as { _core?: { _renderService?: { dimensions?: unknown } } })._core
+    console.log("[Terminal:create] After renderer - dimensions:", coreAfter?._renderService?.dimensions)
+  } catch {
+    console.log("[Terminal:create] After renderer - dimensions not yet available")
+  }
 
   // 6. Set up query response suppression
   console.log("[Terminal:create] Step 6: Setting up query suppression")
@@ -370,28 +374,27 @@ function getTerminalCoordsFromEvent(
   const x = event.clientX - rect.left
   const y = event.clientY - rect.top
 
-  // Access internal render service for cell dimensions
-  const dimensions = (
-    xterm as unknown as {
-      _core?: {
-        _renderService?: {
-          dimensions?: { css: { cell: { width: number; height: number } } }
-        }
-      }
-    }
-  )._core?._renderService?.dimensions
+  try {
+    // Access internal render service for cell dimensions (may be undefined before terminal is fully mounted)
+    const core = (xterm as unknown as { _core?: { _renderService?: { dimensions?: { css?: { cell?: { width: number; height: number } } } } } })._core
+    const renderService = core?._renderService
+    const dimensions = renderService?.dimensions
 
-  if (!dimensions?.css?.cell) return null
+    const cell = dimensions?.css?.cell
+    if (!cell) return null
 
-  const cellWidth = dimensions.css.cell.width
-  const cellHeight = dimensions.css.cell.height
+    const cellWidth = cell.width
+    const cellHeight = cell.height
 
-  if (cellWidth <= 0 || cellHeight <= 0) return null
+    if (cellWidth <= 0 || cellHeight <= 0) return null
 
-  const col = Math.max(0, Math.min(xterm.cols - 1, Math.floor(x / cellWidth)))
-  const row = Math.max(0, Math.min(xterm.rows - 1, Math.floor(y / cellHeight)))
+    const col = Math.max(0, Math.min(xterm.cols - 1, Math.floor(x / cellWidth)))
+    const row = Math.max(0, Math.min(xterm.rows - 1, Math.floor(y / cellHeight)))
 
-  return { col, row }
+    return { col, row }
+  } catch {
+    return null
+  }
 }
 
 /**

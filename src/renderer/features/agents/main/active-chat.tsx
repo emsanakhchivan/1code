@@ -27,6 +27,12 @@ import {
 } from "../../../components/ui/prompt-input"
 import { ResizableSidebar } from "../../../components/ui/resizable-sidebar"
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu"
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -67,6 +73,7 @@ import {
   activeConfigAtom,
   defaultAgentModeAtom,
   isDesktopAtom, isFullscreenAtom,
+  pendingTerminalShellTypeAtom,
   sessionInfoAtom,
   selectedOllamaModelAtom,
   soundNotificationsEnabledAtom
@@ -78,7 +85,7 @@ import { appStore } from "../../../lib/jotai-store"
 import { api } from "../../../lib/mock-api"
 import { trpc, trpcClient } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
-import { isDesktopApp } from "../../../lib/utils/platform"
+import { isDesktopApp, isWindows } from "../../../lib/utils/platform"
 import { ChangesPanel } from "../../changes"
 import { useCommitActions } from "../../changes/components/commit-input"
 import { DiffCenterPeekDialog } from "../../changes/components/diff-center-peek-dialog"
@@ -4849,7 +4856,7 @@ export function ChatView({
   onBackToChats?: () => void
   onOpenPreview?: () => void
   onOpenDiff?: () => void
-  onOpenTerminal?: () => void
+  onOpenTerminal?: (shellType?: import("../../../lib/atoms").PreferredTerminalShellType) => void
   hideHeader?: boolean
 }) {
   const [selectedTeamId] = useAtom(selectedTeamIdAtom)
@@ -4965,6 +4972,7 @@ export function ChatView({
     [chatId],
   )
   const [isTerminalSidebarOpen, setIsTerminalSidebarOpen] = useAtom(terminalSidebarAtom)
+  const setPendingTerminalShellType = useSetAtom(pendingTerminalShellTypeAtom)
   const terminalDisplayMode = useAtomValue(terminalDisplayModeAtom)
 
   // Keyboard shortcut: Cmd+J to toggle terminal
@@ -7505,7 +7513,10 @@ Make sure to preserve all functionality from both branches when resolving confli
                         canOpenDiff={canShowDiffButton}
                         isDiffSidebarOpen={isDiffSidebarOpen}
                         diffStats={diffStats}
-                        onOpenTerminal={() => setIsTerminalSidebarOpen(true)}
+                        onOpenTerminal={(shellType) => {
+                          if (shellType) setPendingTerminalShellType(shellType)
+                          setIsTerminalSidebarOpen(true)
+                        }}
                         canOpenTerminal={!!worktreePath}
                         isTerminalOpen={isTerminalSidebarOpen}
                         chatId={chatId}
@@ -7597,25 +7608,87 @@ Make sure to preserve all functionality from both branches when resolving confli
                         </Tooltip>
                       )
                     ) : (
-                      // Terminal button for legacy sidebars
+                      // Terminal button with dropdown for legacy sidebars
                       !isTerminalSidebarOpen && (
-                        <Tooltip delayDuration={500}>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setIsTerminalSidebarOpen(true)}
-                              className="h-6 w-6 p-0 hover:bg-foreground/10 transition-colors text-foreground flex-shrink-0 rounded-md ml-2"
-                              aria-label="Open terminal"
-                            >
-                              <TerminalSquare className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            Open terminal
-                            {toggleTerminalHotkey && <Kbd>{toggleTerminalHotkey}</Kbd>}
-                          </TooltipContent>
-                        </Tooltip>
+                        <div className="flex items-center rounded-md ml-2">
+                          <Tooltip delayDuration={500}>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setIsTerminalSidebarOpen(true)}
+                                className="h-6 w-6 p-0 rounded-r-none hover:bg-foreground/10 transition-colors text-foreground flex-shrink-0"
+                                aria-label="Open terminal"
+                              >
+                                <TerminalSquare className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom">
+                              Open terminal
+                              {toggleTerminalHotkey && <Kbd>{toggleTerminalHotkey}</Kbd>}
+                            </TooltipContent>
+                          </Tooltip>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 p-0 rounded-l-none border-l border-border/50 hover:bg-foreground/10 transition-colors text-foreground flex-shrink-0"
+                              >
+                                <ChevronDown className="h-3 w-3" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="min-w-[160px]">
+                              {isWindows() ? (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setPendingTerminalShellType("powershell")
+                                      setIsTerminalSidebarOpen(true)
+                                    }}
+                                  >
+                                    PowerShell
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setPendingTerminalShellType("cmd")
+                                      setIsTerminalSidebarOpen(true)
+                                    }}
+                                  >
+                                    Command Prompt
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setPendingTerminalShellType("bash")
+                                      setIsTerminalSidebarOpen(true)
+                                    }}
+                                  >
+                                    Bash (Git Bash)
+                                  </DropdownMenuItem>
+                                </>
+                              ) : (
+                                <>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setPendingTerminalShellType("bash")
+                                      setIsTerminalSidebarOpen(true)
+                                    }}
+                                  >
+                                    Bash
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setPendingTerminalShellType("zsh")
+                                      setIsTerminalSidebarOpen(true)
+                                    }}
+                                  >
+                                    Zsh
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       )
                     )
                   )}

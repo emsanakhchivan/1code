@@ -1,10 +1,13 @@
+import fs from "node:fs"
 import os from "node:os"
+import path from "node:path"
 import {
   platform,
   getDefaultShell as platformGetDefaultShell,
   detectShell as platformDetectShell,
   detectLocale as platformDetectLocale,
 } from "../platform"
+import type { TerminalShellType } from "../../../shared/terminal-shell-types"
 
 export const FALLBACK_SHELL =
   platform.platform === "win32" ? "cmd.exe" : "/bin/sh"
@@ -43,6 +46,48 @@ export function getDefaultShell(): string {
 
   // Return platform default as fast fallback
   return platformGetDefaultShell()
+}
+
+/**
+ * Resolve shell executable path from user-selected shell type.
+ * Falls back to getDefaultShell() if type is invalid or shell not found.
+ */
+export function getShellPathForType(shellType: TerminalShellType | string): string {
+  const plat = os.platform()
+
+  if (plat === "win32") {
+    const systemRoot = process.env.SystemRoot || "C:\\Windows"
+    switch (shellType) {
+      case "cmd":
+        return process.env.COMSPEC || path.join(systemRoot, "System32", "cmd.exe")
+      case "powershell": {
+        const pwshPath = path.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        return fs.existsSync(pwshPath) ? pwshPath : getDefaultShell()
+      }
+      case "bash": {
+        const gitBashPaths = [
+          "C:\\Program Files\\Git\\bin\\bash.exe",
+          "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+        ]
+        for (const p of gitBashPaths) {
+          if (fs.existsSync(p)) return p
+        }
+        return getDefaultShell()
+      }
+      default:
+        return getDefaultShell()
+    }
+  }
+
+  // macOS / Linux
+  switch (shellType) {
+    case "bash":
+      return fs.existsSync("/bin/bash") ? "/bin/bash" : getDefaultShell()
+    case "zsh":
+      return fs.existsSync("/bin/zsh") ? "/bin/zsh" : getDefaultShell()
+    default:
+      return getDefaultShell()
+  }
 }
 
 /**

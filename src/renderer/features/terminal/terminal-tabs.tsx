@@ -533,7 +533,7 @@ export const TerminalTabs = memo(function TerminalTabs({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={onCreateTerminal}
+                  onClick={() => onCreateTerminal()}
                   className="h-6 w-6 p-0 hover:bg-foreground/10 transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] rounded-md"
                   aria-label="New terminal"
                 >

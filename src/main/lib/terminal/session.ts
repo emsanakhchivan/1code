@@ -2,7 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import * as pty from "node-pty"
-import { buildTerminalEnv, FALLBACK_SHELL, getDefaultShell } from "./env"
+import { buildTerminalEnv, FALLBACK_SHELL, getDefaultShell, getShellPathForType } from "./env"
 import type { InternalCreateSessionParams, TerminalSession } from "./types"
 
 const DEFAULT_COLS = 80
@@ -15,6 +15,7 @@ function getShellArgs(shell: string): string[] {
 	if (shell.includes("bash")) {
 		return []
 	}
+	// PowerShell and cmd don't need login args
 	return []
 }
 
@@ -127,9 +128,14 @@ export async function createSession(
 		cols,
 		rows,
 		useFallbackShell = false,
+		shellType,
 	} = params
 
-	const shell = useFallbackShell ? FALLBACK_SHELL : getDefaultShell()
+	const shell = useFallbackShell
+		? FALLBACK_SHELL
+		: shellType
+			? getShellPathForType(shellType)
+			: getDefaultShell()
 	const workingDir = validateAndResolveCwd(cwd || os.homedir())
 	const terminalCols = cols || DEFAULT_COLS
 	const terminalRows = rows || DEFAULT_ROWS

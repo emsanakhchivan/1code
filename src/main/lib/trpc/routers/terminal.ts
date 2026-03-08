@@ -23,6 +23,7 @@ export const terminalRouter = router({
 				rows: z.number().int().positive().optional(),
 				cwd: z.string().optional(),
 				initialCommands: z.array(z.string()).optional(),
+				shellType: z.enum(["bash", "powershell", "cmd", "zsh"]).optional(),
 			}),
 		)
 		.mutation(async ({ input }) => {

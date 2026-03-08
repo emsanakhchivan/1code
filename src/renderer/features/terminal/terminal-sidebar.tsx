@@ -29,6 +29,10 @@ import { Terminal } from "./terminal"
 import { TerminalTabs } from "./terminal-tabs"
 import { getDefaultTerminalBg } from "./helpers"
 import {
+  preferredTerminalShellAtom,
+  pendingTerminalShellTypeAtom,
+} from "@/lib/atoms"
+import {
   terminalSidebarOpenAtomFamily,
   terminalSidebarWidthAtom,
   terminalDisplayModeAtom,
@@ -156,6 +160,8 @@ export function TerminalSidebar({
   const [allTerminals, setAllTerminals] = useAtom(terminalsAtom)
   const [allActiveIds, setAllActiveIds] = useAtom(activeTerminalIdAtom)
   const terminalCwds = useAtomValue(terminalCwdAtom)
+  const preferredShell = useAtomValue(preferredTerminalShellAtom)
+  const [pendingShell, setPendingShell] = useAtom(pendingTerminalShellTypeAtom)
 
   // Theme detection for terminal background
   const { resolvedTheme } = useTheme()
@@ -206,33 +212,43 @@ export function TerminalSidebar({
   const activeTerminalIdRef = useRef(activeTerminalId)
   activeTerminalIdRef.current = activeTerminalId
 
-  // Create a new terminal - stable callback
-  const createTerminal = useCallback(() => {
-    const currentScopeKey = scopeKeyRef.current
-    const currentTerminals = terminalsRef.current
+  // Create a new terminal - stable callback. shellType override used when opening from dropdown.
+  const createTerminal = useCallback(
+    (shellTypeOverride?: typeof preferredShell) => {
+      const currentScopeKey = scopeKeyRef.current
+      const currentTerminals = terminalsRef.current
 
-    const id = generateTerminalId()
-    const paneId = generatePaneId(currentScopeKey, id)
-    const name = getNextTerminalName(currentTerminals)
+      const id = generateTerminalId()
+      const paneId = generatePaneId(currentScopeKey, id)
+      const name = getNextTerminalName(currentTerminals)
+      // Guard: only use override if valid string (prevents event objects from onClick)
+      const rawShell =
+        typeof shellTypeOverride === "string" && ["bash", "powershell", "cmd", "zsh", "system"].includes(shellTypeOverride)
+          ? shellTypeOverride
+          : preferredShell
+      const shellType = rawShell === "system" ? undefined : rawShell
 
-    const newTerminal: TerminalInstance = {
-      id,
-      paneId,
-      name,
-      createdAt: Date.now(),
-    }
+      const newTerminal: TerminalInstance = {
+        id,
+        paneId,
+        name,
+        createdAt: Date.now(),
+        shellType,
+      }
 
-    setAllTerminals((prev) => ({
-      ...prev,
-      [currentScopeKey]: [...(prev[currentScopeKey] || []), newTerminal],
-    }))
+      setAllTerminals((prev) => ({
+        ...prev,
+        [currentScopeKey]: [...(prev[currentScopeKey] || []), newTerminal],
+      }))
 
-    // Set as active
-    setAllActiveIds((prev) => ({
-      ...prev,
-      [currentScopeKey]: id,
-    }))
-  }, [setAllTerminals, setAllActiveIds])
+      // Set as active
+      setAllActiveIds((prev) => ({
+        ...prev,
+        [currentScopeKey]: id,
+      }))
+    },
+    [setAllTerminals, setAllActiveIds, preferredShell],
+  )
 
   // Select a terminal - stable callback
   const selectTerminal = useCallback(
@@ -388,6 +404,9 @@ export function TerminalSidebar({
   useEffect(() => {
     if (!isOpen || terminals.length > 0) return
 
+    const effectiveShell = pendingShell ?? preferredShell
+    if (pendingShell) setPendingShell(null)
+
     if (isSharedTerminalScope(scopeKey)) {
       // Shared scope (local mode): check backend for existing sessions
       trpcUtils.terminal.listSessionsByScopeKey
@@ -407,16 +426,16 @@ export function TerminalSidebar({
               [scopeKey]: instances[0]?.id || null,
             }))
           } else {
-            createTerminal()
+            createTerminal(effectiveShell)
           }
         })
         .catch(() => {
-          createTerminal()
+          createTerminal(effectiveShell)
         })
     } else {
-      createTerminal()
+      createTerminal(effectiveShell)
     }
-  }, [isOpen, terminals.length, scopeKey, createTerminal, trpcUtils, setAllTerminals, setAllActiveIds])
+  }, [isOpen, terminals.length, scopeKey, createTerminal, trpcUtils, setAllTerminals, setAllActiveIds, pendingShell, preferredShell, setPendingShell])
 
   // Note: Cmd+J keyboard shortcut is handled in active-chat.tsx
   // to ensure it works regardless of terminal display mode or focus state.
@@ -497,6 +516,7 @@ export function TerminalSidebar({
                 tabId={tabId}
                 initialCommands={initialCommands}
                 initialCwd={cwd}
+                shellType={activeTerminal.shellType}
               />
             </motion.div>
           ) : (
@@ -597,6 +617,7 @@ export function TerminalSidebar({
                 tabId={tabId}
                 initialCommands={initialCommands}
                 initialCwd={cwd}
+                shellType={activeTerminal.shellType}
               />
             </motion.div>
           ) : (
@@ -637,6 +658,8 @@ export function TerminalBottomPanelContent({
   const [allActiveIds, setAllActiveIds] = useAtom(activeTerminalIdAtom)
   const terminalCwds = useAtomValue(terminalCwdAtom)
   const [displayMode, setDisplayMode] = useAtom(terminalDisplayModeAtom)
+  const preferredShell = useAtomValue(preferredTerminalShellAtom)
+  const [pendingShell, setPendingShell] = useAtom(pendingTerminalShellTypeAtom)
   const trpcUtils = trpc.useUtils()
 
   const { resolvedTheme } = useTheme()
@@ -676,19 +699,33 @@ export function TerminalBottomPanelContent({
   const activeTerminalIdRef = useRef(activeTerminalId)
   activeTerminalIdRef.current = activeTerminalId
 
-  const createTerminal = useCallback(() => {
-    const currentScopeKey = scopeKeyRef.current
-    const currentTerminals = terminalsRef.current
-    const id = generateTerminalId()
-    const paneId = generatePaneId(currentScopeKey, id)
-    const name = getNextTerminalName(currentTerminals)
-    const newTerminal: TerminalInstance = { id, paneId, name, createdAt: Date.now() }
-    setAllTerminals((prev) => ({
-      ...prev,
-      [currentScopeKey]: [...(prev[currentScopeKey] || []), newTerminal],
-    }))
-    setAllActiveIds((prev) => ({ ...prev, [currentScopeKey]: id }))
-  }, [setAllTerminals, setAllActiveIds])
+  const createTerminal = useCallback(
+    (shellTypeOverride?: typeof preferredShell) => {
+      const currentScopeKey = scopeKeyRef.current
+      const currentTerminals = terminalsRef.current
+      const id = generateTerminalId()
+      const paneId = generatePaneId(currentScopeKey, id)
+      const name = getNextTerminalName(currentTerminals)
+      const rawShell =
+        typeof shellTypeOverride === "string" && ["bash", "powershell", "cmd", "zsh", "system"].includes(shellTypeOverride)
+          ? shellTypeOverride
+          : preferredShell
+      const shellType = rawShell === "system" ? undefined : rawShell
+      const newTerminal: TerminalInstance = {
+        id,
+        paneId,
+        name,
+        createdAt: Date.now(),
+        shellType,
+      }
+      setAllTerminals((prev) => ({
+        ...prev,
+        [currentScopeKey]: [...(prev[currentScopeKey] || []), newTerminal],
+      }))
+      setAllActiveIds((prev) => ({ ...prev, [currentScopeKey]: id }))
+    },
+    [setAllTerminals, setAllActiveIds, preferredShell],
+  )
 
   const selectTerminal = useCallback(
     (id: string) => {
@@ -774,6 +811,9 @@ export function TerminalBottomPanelContent({
   useEffect(() => {
     if (terminals.length > 0) return
 
+    const effectiveShell = pendingShell ?? preferredShell
+    if (pendingShell) setPendingShell(null)
+
     if (isSharedTerminalScope(scopeKey)) {
       trpcUtils.terminal.listSessionsByScopeKey
         .fetch({ scopeKey })
@@ -791,16 +831,16 @@ export function TerminalBottomPanelContent({
               [scopeKey]: instances[0]?.id || null,
             }))
           } else {
-            createTerminal()
+            createTerminal(effectiveShell)
           }
         })
         .catch(() => {
-          createTerminal()
+          createTerminal(effectiveShell)
         })
     } else {
-      createTerminal()
+      createTerminal(effectiveShell)
     }
-  }, [terminals.length, scopeKey, createTerminal, trpcUtils, setAllTerminals, setAllActiveIds])
+  }, [terminals.length, scopeKey, createTerminal, trpcUtils, setAllTerminals, setAllActiveIds, pendingShell, preferredShell, setPendingShell])
 
   return (
     <div className="flex flex-col h-full min-w-0 overflow-hidden">
@@ -870,6 +910,7 @@ export function TerminalBottomPanelContent({
               tabId={tabId}
               initialCommands={initialCommands}
               initialCwd={cwd}
+              shellType={activeTerminal.shellType}
             />
           </motion.div>
         ) : (

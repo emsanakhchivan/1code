@@ -49,6 +49,8 @@ export interface CreateSessionParams {
 	cols?: number
 	rows?: number
 	initialCommands?: string[]
+	/** User-selected shell type: bash, powershell, cmd (Windows), zsh (macOS/Linux) */
+	shellType?: string
 }
 
 export interface InternalCreateSessionParams extends CreateSessionParams {

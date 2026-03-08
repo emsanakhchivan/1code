@@ -14,7 +14,7 @@ import {
 } from "../../details-sidebar/atoms"
 import { chatSourceModeAtom } from "../../../lib/atoms"
 import { trpc } from "../../../lib/trpc"
-import { Plus, AlignJustify, Play, TerminalSquare, X } from "lucide-react"
+import { Plus, AlignJustify, Play, TerminalSquare, X, ChevronDown } from "lucide-react"
 import {
   IconSpinner,
   PlanIcon,
@@ -46,6 +46,14 @@ import {
   ContextMenu,
   ContextMenuTrigger,
 } from "../../../components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu"
+import type { PreferredTerminalShellType } from "../../../lib/atoms"
+import { isWindows } from "../../../lib/utils/platform"
 import { InlineEdit } from "./inline-edit"
 import { api } from "../../../lib/mock-api"
 import { toast } from "sonner"
@@ -175,7 +183,7 @@ interface SubChatSelectorProps {
   canOpenDiff?: boolean
   isDiffSidebarOpen?: boolean
   diffStats?: DiffStats
-  onOpenTerminal?: () => void
+  onOpenTerminal?: (shellType?: PreferredTerminalShellType) => void
   canOpenTerminal?: boolean
   isTerminalOpen?: boolean
   chatId?: string
@@ -991,7 +999,7 @@ export function SubChatSelector({
         </div>
       )}
 
-      {/* Terminal button - visible on desktop when unified sidebar is disabled OR terminal widget is hidden, and terminal is not already open */}
+      {/* Terminal button with dropdown - main click opens default, dropdown opens specific shell */}
       {!isMobile && canOpenTerminal && showTerminalButton && !isTerminalOpen && (
         <div
           className="rounded-md bg-background/10 backdrop-blur-[10px] flex items-center justify-center"
@@ -1000,23 +1008,60 @@ export function SubChatSelector({
             WebkitAppRegion: "no-drag",
           }}
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => onOpenTerminal?.()}
-                className="h-6 w-6 p-0 transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] flex-shrink-0 rounded-md flex items-center justify-center hover:bg-foreground/10"
-              >
-                <TerminalSquare className="h-4 w-4" />
-                <span className="sr-only">Open terminal</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              <span>Open terminal</span>
-              {toggleTerminalHotkey && <Kbd>{toggleTerminalHotkey}</Kbd>}
-            </TooltipContent>
-          </Tooltip>
+          <div className="flex items-center rounded-md border border-transparent hover:bg-foreground/10">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onOpenTerminal?.()}
+                  className="h-6 w-6 p-0 rounded-r-none transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] flex-shrink-0 flex items-center justify-center hover:bg-foreground/10"
+                >
+                  <TerminalSquare className="h-4 w-4" />
+                  <span className="sr-only">Open terminal</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <span>Open terminal</span>
+                {toggleTerminalHotkey && <Kbd>{toggleTerminalHotkey}</Kbd>}
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 p-0 rounded-l-none border-l border-border/50 transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] flex-shrink-0 flex items-center justify-center hover:bg-foreground/10"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-[160px]">
+                {isWindows() ? (
+                  <>
+                    <DropdownMenuItem onClick={() => onOpenTerminal?.("powershell")}>
+                      PowerShell
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onOpenTerminal?.("cmd")}>
+                      Command Prompt
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onOpenTerminal?.("bash")}>
+                      Bash (Git Bash)
+                    </DropdownMenuItem>
+                  </>
+                ) : (
+                  <>
+                    <DropdownMenuItem onClick={() => onOpenTerminal?.("bash")}>
+                      Bash
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onOpenTerminal?.("zsh")}>
+                      Zsh
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
       )}
 

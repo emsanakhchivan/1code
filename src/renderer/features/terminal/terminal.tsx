@@ -35,6 +35,7 @@ export function Terminal({
   tabId,
   initialCommands,
   initialCwd,
+  shellType,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
@@ -198,6 +199,7 @@ export function Terminal({
           cols: xterm.cols,
           rows: xterm.rows,
           cwd: terminalCwdRef.current || cwd,
+          shellType,
         },
         {
           onSuccess: (result) => {
@@ -252,6 +254,7 @@ export function Terminal({
         rows: xterm.rows,
         cwd: initialCwd || cwd,
         initialCommands,
+        shellType,
       },
       {
         onSuccess: (result) => {

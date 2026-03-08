@@ -38,7 +38,7 @@ interface MobileChatHeaderProps {
   onOpenDiff?: () => void
   canOpenDiff?: boolean
   diffStats?: DiffStats
-  onOpenTerminal?: () => void
+  onOpenTerminal?: (shellType?: import("../../../lib/atoms").PreferredTerminalShellType) => void
   canOpenTerminal?: boolean
   isTerminalOpen?: boolean
   isArchived?: boolean

@@ -1000,6 +1000,22 @@ export const preferredEditorAtom = atomWithStorage<ExternalApp>(
 )
 
 // ============================================
+// PREFERRED TERMINAL SHELL
+// ============================================
+
+export type PreferredTerminalShellType = "bash" | "powershell" | "cmd" | "zsh" | "system"
+
+export const preferredTerminalShellAtom = atomWithStorage<PreferredTerminalShellType>(
+  "agents:preferred-terminal-shell",
+  "system",
+  undefined,
+  { getOnInit: true },
+)
+
+/** Transient: set when user opens terminal from dropdown with specific shell; consumed when sidebar creates first terminal */
+export const pendingTerminalShellTypeAtom = atom<PreferredTerminalShellType | null>(null)
+
+// ============================================
 // MCP APPROVAL DIALOG ATOMS
 // ============================================
 

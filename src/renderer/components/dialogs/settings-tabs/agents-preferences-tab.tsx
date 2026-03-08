@@ -10,10 +10,13 @@ import {
   notifyWhenFocusedAtom,
   soundNotificationsEnabledAtom,
   preferredEditorAtom,
+  preferredTerminalShellAtom,
   type AgentMode,
   type AutoAdvanceTarget,
   type CtrlTabTarget,
+  type PreferredTerminalShellType,
 } from "../../../lib/atoms"
+import { isWindows } from "../../../lib/utils/platform"
 import { APP_META, type ExternalApp } from "../../../../shared/external-apps"
 
 // Editor icon imports
@@ -153,7 +156,24 @@ export function AgentsPreferencesTab() {
   const [autoAdvanceTarget, setAutoAdvanceTarget] = useAtom(autoAdvanceTargetAtom)
   const [defaultAgentMode, setDefaultAgentMode] = useAtom(defaultAgentModeAtom)
   const [preferredEditor, setPreferredEditor] = useAtom(preferredEditorAtom)
+  const [preferredTerminalShell, setPreferredTerminalShell] = useAtom(
+    preferredTerminalShellAtom,
+  )
   const isNarrowScreen = useIsNarrowScreen()
+
+  const terminalShellOptions: { value: PreferredTerminalShellType; label: string }[] =
+    isWindows()
+      ? [
+          { value: "system", label: "System default" },
+          { value: "powershell", label: "PowerShell" },
+          { value: "cmd", label: "Command Prompt" },
+          { value: "bash", label: "Bash (Git Bash)" },
+        ]
+      : [
+          { value: "system", label: "System default" },
+          { value: "bash", label: "Bash" },
+          { value: "zsh", label: "Zsh" },
+        ]
 
   // Co-authored-by setting from Claude settings.json
   const { data: includeCoAuthoredBy, refetch: refetchCoAuthoredBy } =
@@ -450,6 +470,36 @@ export function AgentsPreferencesTab() {
               </DropdownMenuSub>
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
+        <div className="flex items-center justify-between p-4 border-t border-border">
+          <div className="flex flex-col space-y-1">
+            <span className="text-sm font-medium text-foreground">
+              Default Terminal
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Shell used when opening a new terminal (PowerShell, Bash, etc.)
+            </span>
+          </div>
+          <Select
+            value={preferredTerminalShell}
+            onValueChange={(value: PreferredTerminalShellType) =>
+              setPreferredTerminalShell(value)
+            }
+          >
+            <SelectTrigger className="w-auto px-2 min-w-[140px]">
+              <span className="text-xs">
+                {terminalShellOptions.find((o) => o.value === preferredTerminalShell)
+                  ?.label ?? "System default"}
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {terminalShellOptions.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

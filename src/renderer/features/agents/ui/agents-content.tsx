@@ -37,6 +37,7 @@ import {
   betaKanbanEnabledAtom,
   betaAutomationsEnabledAtom,
   chatSourceModeAtom,
+  pendingTerminalShellTypeAtom,
 } from "../../../lib/atoms"
 import { NewChatForm } from "../main/new-chat-form"
 import { KanbanView } from "../../kanban"
@@ -104,6 +105,7 @@ export function AgentsContent() {
     [selectedChatId],
   )
   const setTerminalSidebarOpen = useSetAtom(terminalSidebarAtom)
+  const setPendingTerminalShellType = useSetAtom(pendingTerminalShellTypeAtom)
 
   const hasOpenedSubChatsSidebar = useRef(false)
   const wasSubChatsSidebarOpen = useRef(false)
@@ -940,7 +942,8 @@ export function AgentsContent() {
                 }
                 onOpenTerminal={
                   canShowTerminal
-                    ? () => {
+                    ? (shellType) => {
+                        if (shellType) setPendingTerminalShellType(shellType)
                         setTerminalSidebarOpen(true)
                         setMobileViewMode("terminal")
                       }
