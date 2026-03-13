@@ -41,6 +41,10 @@ bun run package:linux    # Build Linux (AppImage + DEB)
 # Database (Drizzle + SQLite)
 bun run db:generate      # Generate migrations from schema
 bun run db:push          # Push schema directly (dev only)
+
+# Type Check
+bunx tsc --noEmit --skipLibCheck  # Run TypeScript type checking
+# IMPORTANT: Always use bunx, NOT npx - this project uses bun, not npm
 ```
 
 ## Architecture
