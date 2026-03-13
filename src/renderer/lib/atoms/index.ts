@@ -1,5 +1,5 @@
 import { atom } from "jotai"
-import { atomWithStorage } from "jotai/utils"
+import { atomWithStorage, atomFamily } from "jotai/utils"
 import { desktopViewAtom as _desktopViewAtom } from "../../features/agents/atoms"
 
 // ============================================
@@ -195,6 +195,7 @@ export type SettingsTab =
   | "debug"
   | "beta"
   | "keyboard"
+  | "monitor"
 export const agentsSettingsDialogActiveTabAtom = atom<SettingsTab>("preferences")
 // Derived atom: maps settings open/close to desktopView navigation
 export const agentsSettingsDialogOpenAtom = atom(
@@ -357,6 +358,60 @@ export const activeCustomModelIdAtom = atomWithStorage<string | null>(
   null,
   undefined,
   { getOnInit: true },
+)
+
+// Per-subChat storage for custom profile/model selection
+// This ensures each subChat remembers its own custom model selection
+const subChatProfileIdsStorageAtom = atomWithStorage<Record<string, string | null>>(
+  "agents:subChatProfileIds",
+  {},
+  undefined,
+  { getOnInit: true },
+)
+
+const subChatCustomModelIdsStorageAtom = atomWithStorage<Record<string, string | null>>(
+  "agents:subChatCustomModelIds",
+  {},
+  undefined,
+  { getOnInit: true },
+)
+
+// AtomFamily for per-subChat profile ID
+export const subChatProfileIdAtomFamily = atomFamily((subChatId: string) =>
+  atom(
+    (get) => {
+      if (!subChatId) return get(activeProfileIdAtom)
+      return get(subChatProfileIdsStorageAtom)[subChatId] ?? null
+    },
+    (get, set, newProfileId: string | null) => {
+      if (!subChatId) {
+        set(activeProfileIdAtom, newProfileId)
+        return
+      }
+      const current = get(subChatProfileIdsStorageAtom)
+      if (current[subChatId] === newProfileId) return
+      set(subChatProfileIdsStorageAtom, { ...current, [subChatId]: newProfileId })
+    },
+  ),
+)
+
+// AtomFamily for per-subChat custom model ID
+export const subChatCustomModelIdAtomFamily = atomFamily((subChatId: string) =>
+  atom(
+    (get) => {
+      if (!subChatId) return get(activeCustomModelIdAtom)
+      return get(subChatCustomModelIdsStorageAtom)[subChatId] ?? null
+    },
+    (get, set, newModelId: string | null) => {
+      if (!subChatId) {
+        set(activeCustomModelIdAtom, newModelId)
+        return
+      }
+      const current = get(subChatCustomModelIdsStorageAtom)
+      if (current[subChatId] === newModelId) return
+      set(subChatCustomModelIdsStorageAtom, { ...current, [subChatId]: newModelId })
+    },
+  ),
 )
 
 // Auto-fallback to offline mode when internet is unavailable
@@ -918,6 +973,180 @@ export function normalizeCodexApiKey(apiKey: string): string | null {
 export const hiddenModelsAtom = atomWithStorage<string[]>(
   "preferences:hidden-models-v4",
   ["gpt-5.1-codex-max", "gpt-5.1-codex-mini"],
+  undefined,
+  { getOnInit: true },
+)
+
+// ============================================
+// DEFAULT MODEL FOR NEW CHATS
+// ============================================
+
+/**
+ * Model identifier format:
+ * - Claude standard: `claude:{modelId}` (e.g., `claude:opus`, `claude:sonnet`, `claude:haiku`)
+ * - Codex: `codex:{modelId}` (e.g., `codex:gpt-5.3-codex`)
+ * - Custom: `custom:{profileId}:{modelId}` (e.g., `custom:openrouter-abc:model-xyz`)
+ * - Ollama: `ollama:{modelName}` (e.g., `ollama:qwen2.5-coder:7b`)
+ */
+export type ModelIdentifier = {
+  /** Full identifier string */
+  identifier: string
+  /** Provider type */
+  provider: "claude" | "codex" | "custom" | "ollama"
+  /** Model ID within provider (for custom: combined profileId:modelId) */
+  modelId: string
+  /** For custom models: the profile ID */
+  customProfileId?: string
+  /** For custom models: the model ID within the profile */
+  customModelId?: string
+}
+
+/**
+ * Parse a model identifier string into its components
+ */
+export function parseModelIdentifier(identifier: string): ModelIdentifier {
+  // Remove surrounding quotes if present (JSON string format)
+  const cleanIdentifier = identifier.replace(/^["']|["']$/g, "")
+
+  const [provider, ...rest] = cleanIdentifier.split(":")
+
+  switch (provider) {
+    case "claude":
+      return { identifier: cleanIdentifier, provider: "claude", modelId: rest.join(":") || "opus" }
+    case "codex":
+      return { identifier: cleanIdentifier, provider: "codex", modelId: rest.join(":") || "gpt-5.3-codex" }
+    case "ollama":
+      return { identifier: cleanIdentifier, provider: "ollama", modelId: rest.join(":") || "qwen2.5-coder:7b" }
+    case "custom":
+      // Format: custom:{profileId}:{modelId}
+      const [profileId, ...modelIdParts] = rest
+      return {
+        identifier: cleanIdentifier,
+        provider: "custom",
+        modelId: modelIdParts.join(":"),
+        customProfileId: profileId,
+        customModelId: modelIdParts.join(":"),
+      }
+    default:
+      // Fallback to claude
+      return { identifier: cleanIdentifier, provider: "claude", modelId: "opus" }
+  }
+}
+
+/**
+ * Create a model identifier string from components
+ */
+export function createModelIdentifier(
+  provider: "claude" | "codex" | "ollama",
+  modelId: string
+): string
+export function createModelIdentifier(
+  provider: "custom",
+  profileId: string,
+  modelId: string
+): string
+export function createModelIdentifier(
+  provider: "claude" | "codex" | "custom" | "ollama",
+  modelIdOrProfileId: string,
+  modelId?: string
+): string {
+  if (provider === "custom" && modelId !== undefined) {
+    return `custom:${modelIdOrProfileId}:${modelId}`
+  }
+  return `${provider}:${modelIdOrProfileId}`
+}
+
+/**
+ * Get a user-friendly display name for a model identifier
+ * Resolves model IDs to their display names (e.g., "opus" → "Opus 4.6", custom model IDs to their configured names)
+ *
+ * @param identifier - The model identifier string (e.g., "claude:opus", "custom:profile-123:model-456")
+ * @param profiles - Optional array of model profiles to resolve custom model names
+ * @returns A user-friendly display name
+ */
+export function getModelDisplayName(
+  identifier: string,
+  profiles?: ModelProfile[]
+): string {
+  const parsed = parseModelIdentifier(identifier)
+
+  switch (parsed.provider) {
+    case "claude": {
+      // Import CLAUDE_MODELS dynamically to avoid circular dependency
+      // Format: "Opus 4.6", "Sonnet 4.6", "Haiku 4.5"
+      const modelId = parsed.modelId
+      // Simple mapping for Claude models
+      const claudeNames: Record<string, string> = {
+        "opus": "Opus 4.6",
+        "sonnet": "Sonnet 4.6",
+        "haiku": "Haiku 4.5",
+      }
+      return claudeNames[modelId] || `Claude ${modelId}`
+    }
+    case "codex": {
+      // Simple mapping for Codex models
+      const codexNames: Record<string, string> = {
+        "gpt-5.3-codex": "Codex 5.3",
+        "gpt-5.2-codex": "Codex 5.2",
+        "gpt-5.1-codex-max": "Codex 5.1 Max",
+        "gpt-5.1-codex-mini": "Codex 5.1 Mini",
+      }
+      return codexNames[parsed.modelId] || `Codex ${parsed.modelId}`
+    }
+    case "ollama": {
+      // For Ollama, just return the model name
+      return parsed.modelId || "Ollama"
+    }
+    case "custom": {
+      // For custom models, look up the profile and model name
+      if (profiles && parsed.customProfileId && parsed.customModelId) {
+        const profile = profiles.find(p => p.id === parsed.customProfileId)
+        if (profile) {
+          const model = profile.models.find(m => m.id === parsed.customModelId)
+          if (model) {
+            return model.name
+          }
+        }
+      }
+      // Fallback: return a generic name with profile context
+      return "Custom Model"
+    }
+    default:
+      return identifier
+  }
+}
+
+/**
+ * Last used model across all providers (persisted)
+ * Updated whenever user selects a model in any chat
+ * Used when defaultModelForNewChatsAtom is set to 'last-used'
+ */
+export const lastUsedModelAtom = atomWithStorage<string | null>(
+  "preferences:last-used-model",
+  null, // null = not set yet, will fallback to default
+  undefined,
+  { getOnInit: true },
+)
+
+/**
+ * Last used agent provider (persisted)
+ * Updated whenever user selects a model in any chat
+ */
+export const lastUsedAgentProviderAtom = atomWithStorage<"claude-code" | "codex">(
+  "preferences:last-used-agent-provider",
+  "claude-code",
+  undefined,
+  { getOnInit: true },
+)
+
+/**
+ * Default model for new chats setting
+ * - 'last-used': Use the last used model (default behavior)
+ * - specific identifier: Always use this model
+ */
+export const defaultModelForNewChatsAtom = atomWithStorage<string>(
+  "preferences:default-model-for-new-chats",
+  "last-used", // Default to last used model
   undefined,
   { getOnInit: true },
 )
