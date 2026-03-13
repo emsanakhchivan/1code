@@ -249,7 +249,7 @@ export const chatsRouter = router({
     }),
 
   /**
-   * Get a single chat with all sub-chats
+   * Get a single chat with all sub-chats (excludes archived sub-chats)
    */
   get: publicProcedure
     .input(z.object({ id: z.string() }))
@@ -258,10 +258,11 @@ export const chatsRouter = router({
       const chat = db.select().from(chats).where(eq(chats.id, input.id)).get()
       if (!chat) return null
 
+      // Only get non-archived sub-chats
       const chatSubChats = db
         .select()
         .from(subChats)
-        .where(eq(subChats.chatId, input.id))
+        .where(and(eq(subChats.chatId, input.id), isNull(subChats.archivedAt)))
         .orderBy(subChats.createdAt)
         .all()
 
@@ -711,6 +712,21 @@ export const chatsRouter = router({
     }),
 
   /**
+   * List archived sub-chats for a chat
+   */
+  listArchivedSubChats: publicProcedure
+    .input(z.object({ chatId: z.string() }))
+    .query(({ input }) => {
+      const db = getDatabase()
+      return db
+        .select()
+        .from(subChats)
+        .where(and(eq(subChats.chatId, input.chatId), isNotNull(subChats.archivedAt)))
+        .orderBy(desc(subChats.archivedAt))
+        .all()
+    }),
+
+  /**
    * Create a new sub-chat
    */
   createSubChat: publicProcedure
@@ -1042,6 +1058,36 @@ export const chatsRouter = router({
       const db = getDatabase()
       return db
         .delete(subChats)
+        .where(eq(subChats.id, input.id))
+        .returning()
+        .get()
+    }),
+
+  /**
+   * Archive a sub-chat
+   */
+  archiveSubChat: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(({ input }) => {
+      const db = getDatabase()
+      return db
+        .update(subChats)
+        .set({ archivedAt: new Date() })
+        .where(eq(subChats.id, input.id))
+        .returning()
+        .get()
+    }),
+
+  /**
+   * Restore an archived sub-chat
+   */
+  restoreSubChat: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(({ input }) => {
+      const db = getDatabase()
+      return db
+        .update(subChats)
+        .set({ archivedAt: null })
         .where(eq(subChats.id, input.id))
         .returning()
         .get()
@@ -2115,6 +2161,7 @@ export const chatsRouter = router({
       subChatId: z.string().optional(), // If provided, return stats for only this sub-chat
     }))
     .query(({ input }) => {
+      console.log("[getChatStats] Called with:", { chatId: input.chatId, subChatId: input.subChatId })
       const db = getDatabase()
 
       let chatSubChats
@@ -2146,13 +2193,23 @@ export const chatsRouter = router({
       const toolUsage: Record<string, number> = {}
       let totalInputTokens = 0
       let totalOutputTokens = 0
+      let totalDurationMs = 0
+      // Debug: store first assistant's raw metadata
+      let firstAssistantMetadata: any = null
 
       for (const subChat of chatSubChats) {
         try {
           const messages = JSON.parse(subChat.messages || "[]") as Array<{
             role: string
             parts?: Array<{ type: string; toolName?: string }>
-            metadata?: { usage?: { inputTokens?: number; outputTokens?: number } }
+            metadata?: {
+              inputTokens?: number
+              outputTokens?: number
+              cacheReadInputTokens?: number
+              cacheCreationInputTokens?: number
+              totalTokens?: number
+              durationMs?: number
+            }
           }>
 
           for (const msg of messages) {
@@ -2161,6 +2218,11 @@ export const chatsRouter = router({
               userMessageCount++
             } else if (msg.role === "assistant") {
               assistantMessageCount++
+
+              // Store first assistant message's metadata for debugging
+              if (assistantMessageCount === 1 && msg.metadata) {
+                firstAssistantMetadata = msg.metadata
+              }
 
               // count tool calls
               for (const part of msg.parts || []) {
@@ -2171,9 +2233,23 @@ export const chatsRouter = router({
               }
 
               // aggregate token usage
-              if (msg.metadata?.usage) {
-                totalInputTokens += msg.metadata.usage.inputTokens || 0
-                totalOutputTokens += msg.metadata.usage.outputTokens || 0
+              // Token metadata is stored directly on metadata, not in a nested usage object
+              if (msg.metadata?.inputTokens) {
+                totalInputTokens += msg.metadata.inputTokens || 0
+              }
+              if (msg.metadata?.cacheReadInputTokens) {
+                totalInputTokens += msg.metadata.cacheReadInputTokens || 0
+              }
+              if (msg.metadata?.cacheCreationInputTokens) {
+                totalInputTokens += msg.metadata.cacheCreationInputTokens || 0
+              }
+              if (msg.metadata?.outputTokens) {
+                totalOutputTokens += msg.metadata.outputTokens || 0
+              }
+
+              // aggregate duration
+              if (msg.metadata?.durationMs) {
+                totalDurationMs += msg.metadata.durationMs
               }
             }
           }
@@ -2182,7 +2258,7 @@ export const chatsRouter = router({
         }
       }
 
-      return {
+      const result = {
         messageCount,
         userMessageCount,
         assistantMessageCount,
@@ -2190,7 +2266,13 @@ export const chatsRouter = router({
         toolUsage,
         totalInputTokens,
         totalOutputTokens,
+        totalDurationMs,
         subChatCount: chatSubChats.length,
+        // Debug: include first assistant's raw metadata
+        _debugFirstAssistantMetadata: firstAssistantMetadata,
       }
+
+      console.log("[getChatStats] Returning:", result)
+      return result
     }),
 })
