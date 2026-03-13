@@ -244,12 +244,17 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
 
     // Track per-turn usage from main assistant messages only.
     // Sidechain/subagent assistant messages have parent_tool_use_id set.
+    // Only track usage if it has meaningful values (not all zeros)
     if (msg.type === "assistant" && msg.message?.usage && msg.parent_tool_use_id == null) {
-      lastMainAssistantUsage = {
-        input_tokens: msg.message.usage.input_tokens ?? 0,
-        cache_read_input_tokens: msg.message.usage.cache_read_input_tokens ?? 0,
-        cache_creation_input_tokens: msg.message.usage.cache_creation_input_tokens ?? 0,
-        output_tokens: msg.message.usage.output_tokens ?? 0,
+      const usage = msg.message.usage
+      const hasMeaningfulUsage = (usage.input_tokens > 0 || usage.output_tokens > 0)
+      if (hasMeaningfulUsage) {
+        lastMainAssistantUsage = {
+          input_tokens: usage.input_tokens ?? 0,
+          cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+          cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+          output_tokens: usage.output_tokens ?? 0,
+        }
       }
     }
 
@@ -393,6 +398,7 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
 
       // Compacting status - expose as a tool so it becomes a UI message part
       if (msg.subtype === "status" && msg.status === "compacting") {
+        console.log("[transform.ts] SDK AUTO-COMPACTING started")
         // Create unique ID and save for matching with boundary event
         lastCompactId = `compact-${Date.now()}-${compactCounter++}`
         yield {
@@ -405,6 +411,7 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
 
       // Compact boundary - mark the compacting tool as complete
       if (msg.subtype === "compact_boundary") {
+        console.log("[transform.ts] SDK AUTO-COMPACTING completed")
         let compactId = lastCompactId
         // If we didn't receive a compacting status, create a tool invocation now
         if (!compactId) {
@@ -443,7 +450,10 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
       // Fallback to result usage when assistant usage is unavailable.
       const usage = lastMainAssistantUsage ?? fallbackUsage
 
-      const resolvedInputTokens = usage.input_tokens
+      // Calculate total input tokens including cache read + creation tokens for context window display
+      const resolvedInputTokens = usage.input_tokens +
+        (usage.cache_read_input_tokens ?? 0) +
+        (usage.cache_creation_input_tokens ?? 0)
       const resolvedOutputTokens = resultOutputTokens ?? usage.output_tokens
       const metadata: MessageMetadata = {
         sessionId: msg.session_id,
@@ -461,6 +471,14 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
         // Include finalTextId for collapsing tools when there's a final response
         finalTextId: lastTextId || undefined,
       }
+      console.log("[transform.ts] Yielding message-metadata:", {
+        inputTokens: metadata.inputTokens,
+        outputTokens: metadata.outputTokens,
+        totalTokens: metadata.totalTokens,
+        usage,
+        fallbackUsage,
+        lastMainAssistantUsage,
+      })
       yield { type: "message-metadata", messageMetadata: metadata }
       yield { type: "finish-step" }
       yield { type: "finish", messageMetadata: metadata }
