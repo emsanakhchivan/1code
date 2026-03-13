@@ -24,6 +24,9 @@ const listAgentsProcedure = publicProcedure
   )
   .query(async ({ input }) => {
     const userAgentsDir = path.join(os.homedir(), ".claude", "agents")
+    console.log("[agents] Listing agents from:", userAgentsDir)
+    console.log("[agents] os.homedir():", os.homedir())
+
     const userAgentsPromise = scanAgentsDirectory(userAgentsDir, "user")
 
     let projectAgentsPromise = Promise.resolve<FileAgent[]>([])
@@ -58,6 +61,10 @@ const listAgentsProcedure = publicProcedure
         ...pluginAgentsPromises,
       ])
     const pluginAgents = pluginAgentsArrays.flat()
+
+    console.log("[agents] User agents found:", userAgents.length, userAgents.map(a => a.name))
+    console.log("[agents] Project agents found:", projectAgents.length, projectAgents.map(a => a.name))
+    console.log("[agents] Plugin agents found:", pluginAgents.length, pluginAgents.map(a => a.name))
 
     return [...projectAgents, ...userAgents, ...pluginAgents]
   })
