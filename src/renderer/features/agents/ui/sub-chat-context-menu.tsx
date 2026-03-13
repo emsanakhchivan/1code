@@ -67,6 +67,8 @@ interface SubChatContextMenuProps {
   onRemoveFromSplit?: (subChatId: string) => void
   /** Number of panes currently in split */
   splitPaneCount?: number
+  /** Show details popover for this chat */
+  onShowDetails?: (subChatId: string, element: HTMLElement) => void
 }
 
 export function SubChatContextMenu({
@@ -94,6 +96,7 @@ export function SubChatContextMenu({
   isSplitTab = false,
   onRemoveFromSplit,
   splitPaneCount = 0,
+  onShowDetails,
 }: SubChatContextMenuProps) {
   const closeTabShortcut = useCloseTabShortcut()
 
@@ -115,6 +118,20 @@ export function SubChatContextMenu({
       <ContextMenuItem onClick={() => onRename(subChat)}>
         Rename chat
       </ContextMenuItem>
+      {onShowDetails && (
+        <ContextMenuItem onClick={(e) => {
+          console.log("[ContextMenu] Details clicked:", { subChatId: subChat.id })
+          // Use event to get the trigger - the currentTarget is the menu item
+          // We need to find the original context menu trigger
+          const trigger = document.querySelector(`[data-subchat-id="${subChat.id}"]`) as HTMLElement | null
+          console.log("[ContextMenu] Found trigger:", !!trigger)
+          if (trigger) {
+            onShowDetails(subChat.id, trigger)
+          }
+        }}>
+          Details
+        </ContextMenuItem>
+      )}
       {chatId && (
         <ContextMenuSub>
           <ContextMenuSubTrigger>Export chat</ContextMenuSubTrigger>
