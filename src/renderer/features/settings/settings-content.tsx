@@ -12,6 +12,7 @@ import { AgentsDebugTab } from "../../components/dialogs/settings-tabs/agents-de
 import { AgentsKeyboardTab } from "../../components/dialogs/settings-tabs/agents-keyboard-tab"
 import { AgentsMcpTab } from "../../components/dialogs/settings-tabs/agents-mcp-tab"
 import { AgentsModelsTab } from "../../components/dialogs/settings-tabs/agents-models-tab"
+import { AgentsMonitorTab } from "../../components/dialogs/settings-tabs/agents-monitor-tab"
 import { AgentsPreferencesTab } from "../../components/dialogs/settings-tabs/agents-preferences-tab"
 import { AgentsProfileTab } from "../../components/dialogs/settings-tabs/agents-profile-tab"
 import { AgentsProjectsTab } from "../../components/dialogs/settings-tabs/agents-project-worktree-tab"
@@ -61,6 +62,8 @@ export function SettingsContent() {
         return <AgentsPluginsTab />
       case "projects":
         return <AgentsProjectsTab />
+      case "monitor":
+        return <AgentsMonitorTab />
       case "beta":
         return <AgentsBetaTab />
       case "debug":
