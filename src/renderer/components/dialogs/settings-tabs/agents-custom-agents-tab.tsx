@@ -4,8 +4,18 @@ import { useAtomValue } from "jotai"
 import { selectedProjectAtom, settingsAgentsSidebarWidthAtom } from "../../../features/agents/atoms"
 import { trpc } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
-import { Plus } from "lucide-react"
+import { Plus, Trash2 } from "lucide-react"
 import { CustomAgentIconFilled } from "../../ui/icons"
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "../../ui/alert-dialog"
 import { Input } from "../../ui/input"
 import { Label } from "../../ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui/select"
@@ -30,10 +40,12 @@ function AgentDetail({
   agent,
   onSave,
   isSaving,
+  onDelete,
 }: {
   agent: FileAgent
   onSave: (data: { description: string; prompt: string; model?: "sonnet" | "opus" | "haiku" | "inherit" }) => void
   isSaving: boolean
+  onDelete: () => void
 }) {
   const [description, setDescription] = useState(agent.description)
   const [prompt, setPrompt] = useState(agent.prompt)
@@ -51,7 +63,13 @@ function AgentDetail({
     prompt !== agent.prompt ||
     model !== (agent.model || "inherit")
 
+  const isValid = description.trim().length > 0 && prompt.trim().length > 0
+
   const handleSave = useCallback(() => {
+    if (!isValid) {
+      toast.error("Validation error", { description: "Description and System Prompt are required." })
+      return
+    }
     if (
       description !== agent.description ||
       prompt !== agent.prompt ||
@@ -63,29 +81,28 @@ function AgentDetail({
         model: model as FileAgent["model"],
       })
     }
-  }, [description, prompt, model, agent.description, agent.prompt, agent.model, onSave])
+  }, [description, prompt, model, agent.description, agent.prompt, agent.model, onSave, isValid])
 
   const handleBlur = useCallback(() => {
+    // Don't auto-save if validation fails - let user see the error when they click Save
     if (
       description !== agent.description ||
       prompt !== agent.prompt ||
       model !== (agent.model || "inherit")
     ) {
-      onSave({
-        description,
-        prompt,
-        model: model as FileAgent["model"],
-      })
+      // Just update local state, don't auto-save with potentially empty values
     }
   }, [description, prompt, model, agent.description, agent.prompt, agent.model, onSave])
 
   const handleModelChange = useCallback((value: string) => {
     setModel(value)
-    // Auto-save with new model value
+    // Auto-save with new model value only if form is valid
     if (
-      description !== agent.description ||
-      prompt !== agent.prompt ||
-      value !== (agent.model || "inherit")
+      description.trim().length > 0 &&
+      prompt.trim().length > 0 &&
+      (description !== agent.description ||
+        prompt !== agent.prompt ||
+        value !== (agent.model || "inherit"))
     ) {
       onSave({
         description,
@@ -104,22 +121,35 @@ function AgentDetail({
             <h3 className="text-sm font-semibold text-foreground truncate">{agent.name}</h3>
             <p className="text-xs text-muted-foreground mt-0.5">{agent.path}</p>
           </div>
-          {hasChanges && (
-            <Button size="sm" onClick={handleSave} disabled={isSaving}>
-              {isSaving ? "Saving..." : "Save"}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+            >
+              <Trash2 className="h-4 w-4" />
             </Button>
-          )}
+            {hasChanges && (
+              <Button size="sm" onClick={handleSave} disabled={isSaving || !isValid}>
+                {isSaving ? "Saving..." : "Save"}
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Description */}
         <div className="space-y-1.5">
-          <Label>Description</Label>
+          <Label>Description *</Label>
           <Input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            onBlur={handleBlur}
             placeholder="Agent description..."
+            className={!description.trim() ? "border-red-500/50" : ""}
           />
+          {!description.trim() && (
+            <p className="text-[11px] text-red-500">Description is required</p>
+          )}
         </div>
 
         {/* Model */}
@@ -174,15 +204,17 @@ function AgentDetail({
 
         {/* System Prompt */}
         <div className="space-y-1.5">
-          <Label>System Prompt</Label>
+          <Label>System Prompt *</Label>
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            onBlur={handleBlur}
             rows={16}
-            className="font-mono resize-y"
+            className={`font-mono resize-y ${!prompt.trim() ? "border-red-500/50" : ""}`}
             placeholder="System prompt for this agent..."
           />
+          {!prompt.trim() && (
+            <p className="text-[11px] text-red-500">System Prompt is required</p>
+          )}
         </div>
       </div>
     </div>
@@ -207,7 +239,7 @@ function CreateAgentForm({
   const [model, setModel] = useState("inherit")
   const [source, setSource] = useState<"user" | "project">("user")
 
-  const canSave = name.trim().length > 0
+  const canSave = name.trim().length > 0 && description.trim().length > 0 && prompt.trim().length > 0
 
   return (
     <div className="h-full overflow-y-auto">
@@ -223,23 +255,24 @@ function CreateAgentForm({
         </div>
 
         <div className="space-y-1.5">
-          <Label>Name</Label>
+          <Label>Name *</Label>
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="my-agent"
             autoFocus
           />
-          <p className="text-[11px] text-muted-foreground">Lowercase letters, numbers, and hyphens</p>
+          <p className="text-[11px] text-muted-foreground">Required. Lowercase letters, numbers, and hyphens.</p>
         </div>
 
         <div className="space-y-1.5">
-          <Label>Description</Label>
+          <Label>Description *</Label>
           <Input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="What this agent does..."
           />
+          <p className="text-[11px] text-muted-foreground">Required. A brief description of the agent's purpose.</p>
         </div>
 
         <div className="space-y-1.5">
@@ -273,7 +306,7 @@ function CreateAgentForm({
         )}
 
         <div className="space-y-1.5">
-          <Label>System Prompt</Label>
+          <Label>System Prompt *</Label>
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -281,6 +314,7 @@ function CreateAgentForm({
             className="font-mono resize-y"
             placeholder="You are a specialized agent that..."
           />
+          <p className="text-[11px] text-muted-foreground">Required. The system prompt that defines the agent's behavior.</p>
         </div>
       </div>
     </div>
@@ -315,6 +349,8 @@ export function AgentsCustomAgentsTab() {
 
   const updateMutation = trpc.agents.update.useMutation()
   const createMutation = trpc.agents.create.useMutation()
+  const deleteMutation = trpc.agents.delete.useMutation()
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
   const handleCreate = useCallback(async (data: {
     name: string; description: string; prompt: string; model?: string; source: "user" | "project"
@@ -391,6 +427,26 @@ export function AgentsCustomAgentsTab() {
       toast.error("Failed to save", { description: message })
     }
   }, [updateMutation, selectedProject?.path, refetch])
+
+  const handleDelete = useCallback(async () => {
+    if (!selectedAgent) return
+    try {
+      await deleteMutation.mutateAsync({
+        name: selectedAgent.name,
+        source: selectedAgent.source,
+        cwd: selectedProject?.path,
+      })
+      toast.success("Agent deleted", { description: selectedAgent.name })
+      setDeleteConfirmOpen(false)
+      await refetch()
+      // Select next available agent or clear selection
+      const remainingAgents = agents.filter((a) => a.name !== selectedAgent.name)
+      setSelectedAgentName(remainingAgents.length > 0 ? remainingAgents[0]!.name : null)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete"
+      toast.error("Failed to delete", { description: message })
+    }
+  }, [deleteMutation, selectedAgent, selectedProject?.path, refetch, agents])
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -558,6 +614,7 @@ export function AgentsCustomAgentsTab() {
             agent={selectedAgent}
             onSave={(data) => handleSave(selectedAgent, data)}
             isSaving={updateMutation.isPending}
+            onDelete={() => setDeleteConfirmOpen(true)}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center px-4">
@@ -581,6 +638,29 @@ export function AgentsCustomAgentsTab() {
           </div>
         )}
       </div>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Agent</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{selectedAgent?.name}</strong>? This
+              will remove the agent configuration and cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
