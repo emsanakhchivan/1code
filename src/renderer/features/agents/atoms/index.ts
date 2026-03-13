@@ -236,7 +236,7 @@ export const lastSelectedCodexThinkingAtom = atomWithStorage<CodexThinkingPrefer
 
 // Storage for per-subChat Claude model selection.
 // Falls back to lastSelectedModelIdAtom when sub-chat has no explicit selection yet.
-const subChatModelIdsStorageAtom = atomWithStorage<Record<string, string>>(
+export const subChatModelIdsStorageAtom = atomWithStorage<Record<string, string>>(
   "agents:subChatModelIds",
   {},
   undefined,
@@ -319,6 +319,52 @@ export const subChatCodexThinkingAtomFamily = atomFamily((subChatId: string) =>
       const current = get(subChatCodexThinkingStorageAtom)
       if (current[subChatId] === newThinking) return
       set(subChatCodexThinkingStorageAtom, { ...current, [subChatId]: newThinking })
+    },
+  ),
+)
+
+// Storage for per-subChat custom model profile ID.
+export const subChatProfileIdsStorageAtom = atomWithStorage<Record<string, string | null>>(
+  "agents:subChatProfileIds",
+  {},
+  undefined,
+  { getOnInit: true },
+)
+
+export const subChatProfileIdAtomFamily = atomFamily((subChatId: string) =>
+  atom(
+    (get) => {
+      if (!subChatId) return null
+      return get(subChatProfileIdsStorageAtom)[subChatId] ?? null
+    },
+    (get, set, newProfileId: string | null) => {
+      if (!subChatId) return
+      const current = get(subChatProfileIdsStorageAtom)
+      if (current[subChatId] === newProfileId) return
+      set(subChatProfileIdsStorageAtom, { ...current, [subChatId]: newProfileId })
+    },
+  ),
+)
+
+// Storage for per-subChat custom model ID.
+export const subChatCustomModelIdsStorageAtom = atomWithStorage<Record<string, string | null>>(
+  "agents:subChatCustomModelIds",
+  {},
+  undefined,
+  { getOnInit: true },
+)
+
+export const subChatCustomModelIdAtomFamily = atomFamily((subChatId: string) =>
+  atom(
+    (get) => {
+      if (!subChatId) return null
+      return get(subChatCustomModelIdsStorageAtom)[subChatId] ?? null
+    },
+    (get, set, newCustomModelId: string | null) => {
+      if (!subChatId) return
+      const current = get(subChatCustomModelIdsStorageAtom)
+      if (current[subChatId] === newCustomModelId) return
+      set(subChatCustomModelIdsStorageAtom, { ...current, [subChatId]: newCustomModelId })
     },
   ),
 )
