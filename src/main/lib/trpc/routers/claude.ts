@@ -29,7 +29,7 @@ import {
   type ClaudeConfig,
   type McpServerConfig,
 } from "../../claude-config"
-import { anthropicAccounts, anthropicSettings, chats, claudeCodeCredentials, getDatabase, projects as projectsTable, subChats } from "../../db"
+import { anthropicAccounts, anthropicSettings, chats, claudeCodeCredentials, getDatabase, projects as projectsTable, subChats, tokenUsage } from "../../db"
 import { createRollbackStash } from "../../git/stash"
 import {
   ensureMcpTokensFresh,
@@ -1083,7 +1083,14 @@ export const claudeRouter = router({
             // 4. Setup accumulation state
             const parts: any[] = []
             let currentText = ""
-            let metadata: any = {}
+            // Initialize metadata with model info from the start
+            // This ensures model tag shows immediately when message starts
+            let metadata: any = {
+              modelId: finalCustomConfig?.model || input.model || "claude-3-7-sonnet",
+              modelProvider: finalCustomConfig
+                ? (isUsingOllama ? "ollama" : "custom")
+                : "anthropic",
+            }
 
             // Capture stderr from Claude process for debugging
             const stderrLines: string[] = []
@@ -1093,9 +1100,13 @@ export const claudeRouter = router({
               parseMentions(input.prompt)
 
             // Build agents option for SDK (proper registration via options.agents)
+            // When using custom model (non-Ollama), force agents to inherit the parent model
+            // This ensures subagents use the custom model instead of hardcoded "sonnet"/"haiku"
+            const useInheritModel = !!finalCustomConfig && !isUsingOllama
             const agentsOption = await buildAgentsOption(
               agentMentions,
               input.cwd,
+              useInheritModel,
             )
 
             // Log if agents were mentioned
@@ -1174,6 +1185,14 @@ export const claudeRouter = router({
                 customEnv: {
                   ANTHROPIC_AUTH_TOKEN: finalCustomConfig.token,
                   ANTHROPIC_BASE_URL: finalCustomConfig.baseUrl,
+                  // Override default model names so SDK-internal tools (WebSearch, etc.)
+                  // use the custom model instead of hardcoded "haiku"/"sonnet"/"opus"
+                  ...(finalCustomConfig.model && {
+                    ANTHROPIC_DEFAULT_MODEL: finalCustomConfig.model,
+                    ANTHROPIC_DEFAULT_HAIKU_MODEL: finalCustomConfig.model,
+                    ANTHROPIC_DEFAULT_SONNET_MODEL: finalCustomConfig.model,
+                    ANTHROPIC_DEFAULT_OPUS_MODEL: finalCustomConfig.model,
+                  }),
                 },
               }),
               enableTasks: input.enableTasks ?? true,
@@ -2465,7 +2484,14 @@ ${prompt}
                         break
                       case "message-metadata":
                         metadata = { ...metadata, ...chunk.messageMetadata }
-                        break
+                        // Emit the merged metadata (includes modelId from request start)
+                        // This overrides the original chunk which doesn't have modelId
+                        safeEmit({
+                          type: "message-metadata",
+                          messageMetadata: metadata,
+                        } as UIMessageChunk)
+                        // Skip the original chunk since we emitted our own
+                        continue
                     }
                   }
                   // Break from stream loop if observer closed (user clicked Stop)
@@ -2719,6 +2745,18 @@ ${prompt}
 
             const savedSessionId = metadata.sessionId
 
+            // Inject model info into metadata for usage tracking
+            // This is done here since finalCustomConfig and isUsingOllama are available in this scope
+            if (finalCustomConfig) {
+              metadata.modelId = finalCustomConfig.model
+              metadata.modelProvider = isUsingOllama ? "ollama" : "custom"
+              // For custom configs, we don't have profileId/profileName - those come from frontend
+            } else {
+              // Default Claude model
+              metadata.modelId = input.model || "claude-3-7-sonnet"
+              metadata.modelProvider = "anthropic"
+            }
+
             if (parts.length > 0) {
               const assistantMessage = {
                 id: crypto.randomUUID(),
@@ -2726,6 +2764,17 @@ ${prompt}
                 parts,
                 metadata,
               }
+
+              // DEBUG: Log metadata before saving to DB
+              console.log("[claude.ts] Saving assistant message with metadata:", {
+                metadata,
+                inputTokens: metadata?.inputTokens,
+                outputTokens: metadata?.outputTokens,
+                hasInputTokens: !!metadata?.inputTokens,
+                hasOutputTokens: !!metadata?.outputTokens,
+                modelId: metadata?.modelId,
+                modelProvider: metadata?.modelProvider,
+              })
 
               const finalMessages = [...messagesToSave, assistantMessage]
 
@@ -2755,6 +2804,40 @@ ${prompt}
               .set({ updatedAt: new Date() })
               .where(eq(chats.id, input.chatId))
               .run()
+
+            // Record token usage for analytics (only if we have token data)
+            if (metadata.totalTokens && metadata.totalTokens > 0) {
+              try {
+                // Get projectId from the chat
+                const chatRecord = db.select()
+                  .from(chats)
+                  .where(eq(chats.id, input.chatId))
+                  .get()
+
+                db.insert(tokenUsage)
+                  .values({
+                    subChatId: input.subChatId,
+                    chatId: input.chatId,
+                    projectId: chatRecord?.projectId ?? null,
+                    modelId: metadata.modelId || "unknown",
+                    modelProvider: metadata.modelProvider || null,
+                    modelProfileId: null, // Will be populated from frontend in future
+                    modelProfileName: null,
+                    inputTokens: metadata.inputTokens || 0,
+                    outputTokens: metadata.outputTokens || 0,
+                    cacheReadTokens: metadata.cacheReadInputTokens || 0,
+                    cacheWriteTokens: metadata.cacheCreationInputTokens || 0,
+                    totalTokens: metadata.totalTokens || 0,
+                    costUsd: metadata.totalCostUsd ? Math.round(metadata.totalCostUsd * 100) : null,
+                    durationMs: metadata.durationMs || null,
+                  })
+                  .run()
+                console.log(`[claude.ts] Recorded token usage: ${metadata.totalTokens} tokens for model ${metadata.modelId}`)
+              } catch (usageError) {
+                // Don't fail the stream if usage recording fails
+                console.error("[claude.ts] Failed to record token usage:", usageError)
+              }
+            }
 
             // Create snapshot stash for rollback support
             if (historyEnabled && metadata.sdkMessageUuid && input.cwd) {
