@@ -5,13 +5,18 @@ import {
   claudeLoginModalConfigAtom,
   agentsLoginModalOpenAtom,
   autoOfflineModeAtom,
-  activeConfigAtom,
+  modelProfilesAtom,
+  networkOnlineAtom,
   enableTasksAtom,
   extendedThinkingEnabledAtom,
   historyEnabledAtom,
   selectedOllamaModelAtom,
   sessionInfoAtom,
   showOfflineModeFeaturesAtom,
+  subChatProfileIdAtomFamily,
+  subChatCustomModelIdAtomFamily,
+  normalizeCustomClaudeConfig,
+  customClaudeConfigAtom,
 } from "../../../lib/atoms"
 import { appStore } from "../../../lib/jotai-store"
 import { trpcClient } from "../../../lib/trpc"
@@ -127,6 +132,7 @@ type IPCChatTransportConfig = {
   projectPath?: string // Original project path for MCP config lookup (when using worktrees)
   mode: "plan" | "agent"
   model?: string
+  customModel?: { profileId: string; modelId: string }
 }
 
 // Image attachment type matching the tRPC schema
@@ -171,8 +177,55 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
     const selectedModelId = appStore.get(subChatModelIdAtomFamily(this.config.subChatId))
     const modelString = MODEL_ID_MAP[selectedModelId] || MODEL_ID_MAP["opus"]
 
-    // Use activeConfigAtom which considers both legacy config and new model profiles
-    const customConfig = appStore.get(activeConfigAtom)
+    // Build customConfig from per-subChat profile/model selection (NOT global activeConfigAtom)
+    // This fixes the bug where global profile ID was used instead of per-subChat profile ID
+    const subChatProfileId = appStore.get(subChatProfileIdAtomFamily(this.config.subChatId))
+    const subChatCustomModelId = appStore.get(subChatCustomModelIdAtomFamily(this.config.subChatId))
+    const profiles = appStore.get(modelProfilesAtom)
+    const networkOnline = appStore.get(networkOnlineAtom)
+    const autoOffline = appStore.get(autoOfflineModeAtom)
+
+    let customConfig: { model: string; token: string; baseUrl: string } | undefined = undefined
+
+    // Priority 1: If auto-offline enabled and no internet, use offline profile
+    if (!networkOnline && autoOffline) {
+      const offlineProfile = profiles.find(p => p.isOffline)
+      if (offlineProfile && offlineProfile.models.length > 0) {
+        const model = subChatCustomModelId
+          ? offlineProfile.models.find(m => m.id === subChatCustomModelId)
+          : offlineProfile.models[0]
+        if (model) {
+          customConfig = {
+            model: model.modelId,
+            token: offlineProfile.token,
+            baseUrl: offlineProfile.baseUrl,
+          }
+        }
+      }
+    }
+
+    // Priority 2: If specific profile is selected for this subChat, use it
+    if (!customConfig && subChatProfileId) {
+      const profile = profiles.find(p => p.id === subChatProfileId)
+      if (profile && profile.models.length > 0) {
+        const model = subChatCustomModelId
+          ? profile.models.find(m => m.id === subChatCustomModelId)
+          : profile.models[0]
+        if (model) {
+          customConfig = {
+            model: model.modelId,
+            token: profile.token,
+            baseUrl: profile.baseUrl,
+          }
+        }
+      }
+    }
+
+    // Priority 3: Fallback to legacy config if set
+    if (!customConfig) {
+      const legacyConfig = appStore.get(customClaudeConfigAtom)
+      customConfig = normalizeCustomClaudeConfig(legacyConfig)
+    }
 
     // Get selected Ollama model for offline mode
     const selectedOllamaModel = appStore.get(selectedOllamaModelAtom)
@@ -217,6 +270,16 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
             onData: (chunk: UIMessageChunk) => {
               chunkCount++
               lastChunkType = chunk.type
+
+              // Clear compacting state at stream start - prevents stale "Compacting..." from previous stream
+              if (chunk.type === "start") {
+                const compacting = appStore.get(compactingSubChatsAtom)
+                if (compacting.has(this.config.subChatId)) {
+                  const newCompacting = new Set(compacting)
+                  newCompacting.delete(this.config.subChatId)
+                  appStore.set(compactingSubChatsAtom, newCompacting)
+                }
+              }
 
               // Handle AskUserQuestion - show question UI
               if (chunk.type === "ask-user-question") {
@@ -294,7 +357,6 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
                   mcpServers: chunk.mcpServers,
                   plugins: chunk.plugins,
                   skills: chunk.skills?.length,
-                  // Debug: show all tools to check for MCP tools (format: mcp__servername__toolname)
                   allTools: chunk.tools,
                 })
                 appStore.set(sessionInfoAtom, {
@@ -450,6 +512,13 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
 
               if (chunk.type === "finish") {
                 console.log(`[SD] R:FINISH sub=${subId} n=${chunkCount}`)
+                // Clear compacting state on stream finish - prevents "Compacting..." from getting stuck
+                const compacting = appStore.get(compactingSubChatsAtom)
+                if (compacting.has(this.config.subChatId)) {
+                  const newCompacting = new Set(compacting)
+                  newCompacting.delete(this.config.subChatId)
+                  appStore.set(compactingSubChatsAtom, newCompacting)
+                }
                 try {
                   controller.close()
                 } catch {
@@ -459,6 +528,13 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
             },
             onError: (err: Error) => {
               console.log(`[SD] R:ERROR sub=${subId} n=${chunkCount} last=${lastChunkType} err=${err.message}`)
+              // Clear compacting state on stream error - prevents "Compacting..." from getting stuck
+              const compacting = appStore.get(compactingSubChatsAtom)
+              if (compacting.has(this.config.subChatId)) {
+                const newCompacting = new Set(compacting)
+                newCompacting.delete(this.config.subChatId)
+                appStore.set(compactingSubChatsAtom, newCompacting)
+              }
               // Track transport errors in Sentry
               Sentry.captureException(err, {
                 tags: {
@@ -476,6 +552,13 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
             },
             onComplete: () => {
               console.log(`[SD] R:COMPLETE sub=${subId} n=${chunkCount} last=${lastChunkType}`)
+              // Clear compacting state on stream complete - prevents "Compacting..." from getting stuck
+              const compacting = appStore.get(compactingSubChatsAtom)
+              if (compacting.has(this.config.subChatId)) {
+                const newCompacting = new Set(compacting)
+                newCompacting.delete(this.config.subChatId)
+                appStore.set(compactingSubChatsAtom, newCompacting)
+              }
               // Note: Don't clear pending questions here - let active-chat.tsx handle it
               // via the stream stop detection effect. Clearing here causes race conditions
               // where sync effect immediately restores from messages.
@@ -491,6 +574,13 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
         // Handle abort
         options.abortSignal?.addEventListener("abort", () => {
           console.log(`[SD] R:ABORT sub=${subId} n=${chunkCount} last=${lastChunkType}`)
+          // Clear compacting state on abort - prevents "Compacting..." from getting stuck
+          const compacting = appStore.get(compactingSubChatsAtom)
+          if (compacting.has(this.config.subChatId)) {
+            const newCompacting = new Set(compacting)
+            newCompacting.delete(this.config.subChatId)
+            appStore.set(compactingSubChatsAtom, newCompacting)
+          }
           sub.unsubscribe()
           // trpcClient.claude.cancel.mutate({ subChatId: this.config.subChatId })
           try {
