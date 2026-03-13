@@ -68,6 +68,11 @@ import {
   selectedOllamaModelAtom,
   customHotkeysAtom,
   chatSourceModeAtom,
+  lastUsedModelAtom,
+  lastUsedAgentProviderAtom,
+  defaultModelForNewChatsAtom,
+  parseModelIdentifier,
+  createModelIdentifier,
 } from "../../../lib/atoms"
 // Desktop uses real tRPC
 import { toast } from "sonner"
@@ -182,6 +187,9 @@ export function NewChatForm({
   isMobileFullscreen = false,
   onBackToChats,
 }: NewChatFormProps = {}) {
+  // DEBUG: Component mount log
+  console.log("[NewChatForm] COMPONENT MOUNTED")
+
   // UNCONTROLLED: just track if editor has content for send button
   const [hasContent, setHasContent] = useState(false)
   const [selectedTeamId] = useAtom(selectedTeamIdAtom)
@@ -249,10 +257,14 @@ export function NewChatForm({
   
   // Helper to find active custom model
   const activeCustomModel = useMemo(() => {
+    console.log("[NewChatForm] activeCustomModel check:", { activeProfileId, activeCustomModelId, customProfilesCount: customProfiles.length })
     if (!activeProfileId || !activeCustomModelId) return null
     const profile = customProfiles.find(p => p.id === activeProfileId)
+    console.log("[NewChatForm] found profile:", profile?.name)
     if (!profile) return null
-    return profile.models.find(m => m.id === activeCustomModelId) || null
+    const model = profile.models.find(m => m.id === activeCustomModelId)
+    console.log("[NewChatForm] found model:", model?.name)
+    return model || null
   }, [activeProfileId, activeCustomModelId, customProfiles])
   
   // Connection status for providers
@@ -346,19 +358,7 @@ export function NewChatForm({
     extendedThinkingEnabledAtom,
   )
 
-  const [selectedModel, setSelectedModel] = useState(
-    () =>
-      availableModels.models.find((m) => m.id === lastSelectedModelId) || availableModels.models[0],
-  )
-
-  // Sync selectedModel when atom value changes (e.g., after localStorage hydration)
-  useEffect(() => {
-    const model = availableModels.models.find((m) => m.id === lastSelectedModelId)
-    if (model && model.id !== selectedModel.id) {
-      setSelectedModel(model)
-    }
-  }, [lastSelectedModelId])
-
+  // Codex models - defined early for initial model determination
   const storedCodexApiKey = useAtomValue(codexApiKeyAtom)
   const hasAppCodexApiKey = Boolean(normalizeCodexApiKey(storedCodexApiKey))
   const hiddenModels = useAtomValue(hiddenModelsAtom)
@@ -371,6 +371,98 @@ export function NewChatForm({
     },
     [hasAppCodexApiKey, hiddenModels],
   )
+
+  // Default model for new chats
+  const defaultModelForNewChats = useAtomValue(defaultModelForNewChatsAtom)
+  const lastUsedModel = useAtomValue(lastUsedModelAtom)
+  const lastUsedAgentProvider = useAtomValue(lastUsedAgentProviderAtom)
+  const setLastUsedModel = useSetAtom(lastUsedModelAtom)
+  const setLastUsedAgentProvider = useSetAtom(lastUsedAgentProviderAtom)
+
+  const [selectedModel, setSelectedModel] = useState(
+    () => availableModels.models.find((m) => m.id === lastSelectedModelId) || availableModels.models[0],
+  )
+
+  // Apply default model for new chats on mount
+  // Use the atom values directly (they handle localStorage parsing correctly)
+  useEffect(() => {
+    console.log("[NewChatForm] useEffect RUNNING - availableModels:", availableModels.models.length)
+
+    // Wait for models to be available
+    if (availableModels.models.length === 0) {
+      console.log("[NewChatForm] Models not ready yet, skipping")
+      return
+    }
+
+    console.log("[NewChatForm] atom values:", { defaultModelForNewChats, lastUsedModel })
+
+    // Determine which model to use
+    let modelIdentifier: string | null = null
+
+    if (defaultModelForNewChats === "last-used" && lastUsedModel) {
+      modelIdentifier = lastUsedModel
+    } else if (defaultModelForNewChats && defaultModelForNewChats !== "last-used") {
+      modelIdentifier = defaultModelForNewChats
+    }
+
+    console.log("[NewChatForm] modelIdentifier:", modelIdentifier)
+
+    if (!modelIdentifier) {
+      console.log("[NewChatForm] No model identifier, skipping")
+      return
+    }
+
+    const parsed = parseModelIdentifier(modelIdentifier)
+    console.log("[NewChatForm] parsed:", parsed)
+
+    // Handle different providers
+    if (parsed.provider === "claude") {
+      const model = availableModels.models.find((m) => m.id === parsed.modelId)
+      if (model) {
+        console.log("[NewChatForm] Setting Claude model:", model.id)
+        setSelectedModel(model)
+        setLastSelectedModelId(model.id)
+        setActiveProfileId(null)
+        setActiveCustomModelId(null)
+        if (selectedAgent.id !== "claude-code") {
+          setSelectedAgent(claudeAgent)
+          setLastSelectedAgentId("claude-code")
+        }
+      }
+    } else if (parsed.provider === "codex") {
+      const model = codexUiModels.find((m) => m.id === parsed.modelId)
+      if (model) {
+        console.log("[NewChatForm] Setting Codex model:", model.id)
+        setLastSelectedCodexModelId(model.id)
+        const codexAgent = enabledAgents.find((a) => a.id === "codex") || fallbackAgent
+        setSelectedAgent(codexAgent)
+        setLastSelectedAgentId("codex")
+      }
+    } else if (parsed.provider === "custom" && parsed.customProfileId && parsed.customModelId) {
+      console.log("[NewChatForm] Setting custom model:", parsed.customProfileId, parsed.customModelId)
+      setActiveProfileId(parsed.customProfileId)
+      setActiveCustomModelId(parsed.customModelId)
+      if (selectedAgent.id !== "claude-code") {
+        setSelectedAgent(claudeAgent)
+        setLastSelectedAgentId("claude-code")
+      }
+    } else if (parsed.provider === "ollama" && parsed.modelId) {
+      console.log("[NewChatForm] Setting Ollama model:", parsed.modelId)
+      setSelectedOllamaModel(parsed.modelId)
+      if (selectedAgent.id !== "claude-code") {
+        setSelectedAgent(claudeAgent)
+        setLastSelectedAgentId("claude-code")
+      }
+    }
+  }, [availableModels.models.length, codexUiModels.length, defaultModelForNewChats, lastUsedModel]) // Run when models are ready or model preferences change
+
+  // Sync selectedModel when atom value changes (e.g., after localStorage hydration)
+  useEffect(() => {
+    const model = availableModels.models.find((m) => m.id === lastSelectedModelId)
+    if (model && model.id !== selectedModel.id) {
+      setSelectedModel(model)
+    }
+  }, [lastSelectedModelId])
   const selectedCodexModel = useMemo(
     () =>
       codexUiModels.find((model) => model.id === lastSelectedCodexModelId) ||
@@ -429,6 +521,7 @@ export function NewChatForm({
   const claudeAgent =
     enabledAgents.find((agent) => agent.id === "claude-code") || fallbackAgent
   const selectedModelLabel = useMemo(() => {
+    console.log("[NewChatForm] selectedModelLabel calc:", { selectedAgent: selectedAgent.id, activeProfileId, activeCustomModel: activeCustomModel?.name, selectedModel: selectedModel?.name })
     if (selectedAgent.id === "codex") {
       return selectedCodexModel.name
     }
@@ -439,6 +532,7 @@ export function NewChatForm({
 
     // Show custom model name with profile if selected
     if (activeProfileId && activeCustomModel) {
+      console.log("[NewChatForm] returning custom model name:", activeCustomModel.name)
       return activeCustomModel.name
     }
 
@@ -1945,6 +2039,9 @@ export function NewChatForm({
                               if (!model) return
                               setSelectedModel(model)
                               setLastSelectedModelId(model.id)
+                              // Persist last used model for new chats
+                              setLastUsedModel(createModelIdentifier("claude", model.id))
+                              setLastUsedAgentProvider("claude-code")
                               // Clear profile selection when selecting standard model
                               setActiveProfileId(null)
                             },
@@ -1953,7 +2050,12 @@ export function NewChatForm({
                             ollamaModels: availableModels.ollamaModels,
                             selectedOllamaModel: currentOllamaModel,
                             recommendedOllamaModel: availableModels.recommendedModel,
-                            onSelectOllamaModel: setSelectedOllamaModel,
+                            onSelectOllamaModel: (modelName) => {
+                              setSelectedOllamaModel(modelName)
+                              // Persist last used model for new chats
+                              setLastUsedModel(createModelIdentifier("ollama", modelName))
+                              setLastUsedAgentProvider("claude-code")
+                            },
                             isConnected: isClaudeConnected,
                             thinkingEnabled,
                             onThinkingChange: setThinkingEnabled,
@@ -1964,6 +2066,9 @@ export function NewChatForm({
                             onSelectCustomModel: (profileId, modelId) => {
                               setActiveProfileId(profileId)
                               setActiveCustomModelId(modelId)
+                              // Persist last used model for new chats
+                              setLastUsedModel(createModelIdentifier("custom", profileId, modelId))
+                              setLastUsedAgentProvider("claude-code")
                             },
                             onClearCustomModel: () => {
                               setActiveProfileId(null)
@@ -1986,6 +2091,9 @@ export function NewChatForm({
 
                               setLastSelectedCodexModelId(model.id)
                               setLastSelectedCodexThinking(nextThinking)
+                              // Persist last used model for new chats
+                              setLastUsedModel(createModelIdentifier("codex", model.id))
+                              setLastUsedAgentProvider("codex")
                             },
                             selectedThinking: selectedCodexThinking,
                             onSelectThinking: setLastSelectedCodexThinking,
