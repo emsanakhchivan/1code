@@ -80,4 +80,9 @@ export type MessageMetadata = {
   durationMs?: number
   resultSubtype?: string
   finalTextId?: string
+  // Model tracking for usage analytics
+  modelId?: string              // Model ID used: "claude-3-7-opus", "glm-5", "kimi-k2.5"
+  modelProvider?: string        // Provider: "anthropic" | "openai" | "custom" | "ollama"
+  modelProfileId?: string       // Custom profile ID (if using custom API endpoint)
+  modelProfileName?: string     // Profile display name: "GLM-5", "Kimi", "OpenRouter"
 }
