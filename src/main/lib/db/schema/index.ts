@@ -82,6 +82,7 @@ export const subChats = sqliteTable("sub_chats", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(
     () => new Date(),
   ),
+  archivedAt: integer("archived_at", { mode: "timestamp" }),
 })
 
 export const subChatsRelations = relations(subChats, ({ one }) => ({
@@ -128,6 +129,68 @@ export const anthropicSettings = sqliteTable("anthropic_settings", {
   ),
 })
 
+// ============ TOKEN USAGE ============
+// Tracks token usage per message for analytics and monitoring
+export const tokenUsage = sqliteTable("token_usage", {
+  id: text("id")
+    .primaryKey()
+    .$defaultFn(() => createId()),
+
+  // Relations
+  subChatId: text("sub_chat_id")
+    .notNull()
+    .references(() => subChats.id, { onDelete: "cascade" }),
+  chatId: text("chat_id")
+    .notNull()
+    .references(() => chats.id, { onDelete: "cascade" }),
+  projectId: text("project_id")
+    .references(() => projects.id, { onDelete: "set null" }),
+
+  // Model info (for per-model analytics)
+  modelId: text("model_id").notNull(),              // "claude-3-7-opus", "glm-5", "kimi-k2.5"
+  modelProvider: text("model_provider"),             // "anthropic" | "openai" | "custom" | "ollama"
+  modelProfileId: text("model_profile_id"),          // Custom profile ID (if using custom API)
+  modelProfileName: text("model_profile_name"),       // Display name: "GLM-5", "Kimi", "OpenRouter"
+
+  // Token counts
+  inputTokens: integer("input_tokens").notNull().default(0),
+  outputTokens: integer("output_tokens").notNull().default(0),
+  cacheReadTokens: integer("cache_read_tokens").default(0),
+  cacheWriteTokens: integer("cache_write_tokens").default(0),
+  totalTokens: integer("total_tokens").notNull().default(0),
+
+  // Cost and performance
+  costUsd: integer("cost_usd"),      // In cents (e.g., 125 = $1.25)
+  durationMs: integer("duration_ms"),
+
+  // Metadata
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
+    () => new Date(),
+  ),
+}, (table) => [
+  index("token_usage_subchat_idx").on(table.subChatId),
+  index("token_usage_chat_idx").on(table.chatId),
+  index("token_usage_project_idx").on(table.projectId),
+  index("token_usage_model_idx").on(table.modelId),
+  index("token_usage_created_idx").on(table.createdAt),
+  index("token_usage_provider_idx").on(table.modelProvider),
+])
+
+export const tokenUsageRelations = relations(tokenUsage, ({ one }) => ({
+  subChat: one(subChats, {
+    fields: [tokenUsage.subChatId],
+    references: [subChats.id],
+  }),
+  chat: one(chats, {
+    fields: [tokenUsage.chatId],
+    references: [chats.id],
+  }),
+  project: one(projects, {
+    fields: [tokenUsage.projectId],
+    references: [projects.id],
+  }),
+}))
+
 // ============ TYPE EXPORTS ============
 export type Project = typeof projects.$inferSelect
 export type NewProject = typeof projects.$inferInsert
@@ -140,3 +203,5 @@ export type NewClaudeCodeCredential = typeof claudeCodeCredentials.$inferInsert
 export type AnthropicAccount = typeof anthropicAccounts.$inferSelect
 export type NewAnthropicAccount = typeof anthropicAccounts.$inferInsert
 export type AnthropicSettings = typeof anthropicSettings.$inferSelect
+export type TokenUsage = typeof tokenUsage.$inferSelect
+export type NewTokenUsage = typeof tokenUsage.$inferInsert
