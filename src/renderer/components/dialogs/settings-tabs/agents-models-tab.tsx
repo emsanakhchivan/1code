@@ -1,5 +1,5 @@
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { ChevronDown, Edit2, MoreHorizontal, Plus, Trash2, Check, Settings } from "lucide-react"
+import { ChevronDown, Edit2, MoreHorizontal, Plus, Trash2, Check, Settings, Clock } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
@@ -16,6 +16,11 @@ import {
   openaiApiKeyAtom,
   type ModelProfile,
   type CustomModelConfig,
+  defaultModelForNewChatsAtom,
+  lastUsedModelAtom,
+  parseModelIdentifier,
+  createModelIdentifier,
+  getModelDisplayName,
 } from "../../../lib/atoms"
 import { ClaudeCodeIcon, CodexIcon, SearchIcon } from "../../ui/icons"
 import { CLAUDE_MODELS, CODEX_MODELS } from "../../../features/agents/lib/models"
@@ -765,6 +770,62 @@ export function AgentsModelsTab() {
 
   const [isApiKeysOpen, setIsApiKeysOpen] = useState(false)
 
+  // Default model for new chats
+  const [defaultModelForNewChats, setDefaultModelForNewChats] = useAtom(defaultModelForNewChatsAtom)
+  const [lastUsedModel] = useAtom(lastUsedModelAtom)
+
+  // Build options for default model selector
+  const defaultModelOptions = useMemo(() => {
+    const options: { id: string; label: string; icon: React.ReactNode; description?: string }[] = [
+      {
+        id: "last-used",
+        label: "Last Used Model",
+        icon: <Clock className="h-3.5 w-3.5 text-muted-foreground" />,
+        description: lastUsedModel
+          ? `Currently: ${getModelDisplayName(lastUsedModel, modelProfiles)}`
+          : "Remembers your last selection",
+      },
+    ]
+
+    // Claude models
+    for (const m of CLAUDE_MODELS) {
+      options.push({
+        id: createModelIdentifier("claude", m.id),
+        label: `${m.name} ${m.version}`,
+        icon: <ClaudeCodeIcon className="h-3.5 w-3.5 text-muted-foreground" />,
+      })
+    }
+
+    // Codex models
+    for (const m of CODEX_MODELS) {
+      options.push({
+        id: createModelIdentifier("codex", m.id),
+        label: m.name,
+        icon: <CodexIcon className="h-3.5 w-3.5 text-muted-foreground" />,
+      })
+    }
+
+    // Custom models
+    for (const profile of customProfiles) {
+      if (!profile.isOffline) {
+        for (const model of profile.models) {
+          options.push({
+            id: createModelIdentifier("custom", profile.id, model.id),
+            label: model.name,
+            icon: <Settings className="h-3.5 w-3.5 text-muted-foreground" />,
+            description: profile.name,
+          })
+        }
+      }
+    }
+
+    return options
+  }, [customProfiles, lastUsedModel, modelProfiles])
+
+  const selectedDefaultModel = useMemo(() => {
+    return defaultModelOptions.find(o => o.id === defaultModelForNewChats) || defaultModelOptions[0]
+  }, [defaultModelOptions, defaultModelForNewChats])
+
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
@@ -773,6 +834,62 @@ export function AgentsModelsTab() {
           <h3 className="text-sm font-semibold text-foreground">Models</h3>
         </div>
       )}
+
+      {/* ===== Default Model for New Chats ===== */}
+      <div className="space-y-2">
+        <div className="pb-2">
+          <h4 className="text-sm font-medium text-foreground">
+            Default Model for New Chats
+          </h4>
+          <p className="text-xs text-muted-foreground">
+            Choose which model is selected when you start a new chat
+          </p>
+        </div>
+        <div className="bg-background rounded-lg border border-border overflow-hidden">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/50 transition-colors">
+                <div className="flex items-center gap-2">
+                  {selectedDefaultModel?.icon}
+                  <div className="flex flex-col items-start">
+                    <span className="text-sm font-medium">
+                      {selectedDefaultModel?.label || "Select model"}
+                    </span>
+                    {selectedDefaultModel?.description && (
+                      <span className="text-xs text-muted-foreground">
+                        {selectedDefaultModel.description}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[280px] max-h-[300px] overflow-y-auto">
+              {defaultModelOptions.map((option) => (
+                <DropdownMenuItem
+                  key={option.id}
+                  onClick={() => setDefaultModelForNewChats(option.id)}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <div className="flex items-center gap-2">
+                    {option.icon}
+                    <div className="flex flex-col">
+                      <span className="text-sm">{option.label}</span>
+                      {option.description && option.id !== "last-used" && (
+                        <span className="text-xs text-muted-foreground">{option.description}</span>
+                      )}
+                    </div>
+                  </div>
+                  {defaultModelForNewChats === option.id && (
+                    <Check className="h-4 w-4 text-primary" />
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
 
       {/* ===== Models Section ===== */}
       <div className="space-y-2">
