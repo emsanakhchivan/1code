@@ -1249,6 +1249,7 @@ const ArchiveSection = memo(function ArchiveSection({ archivedChatsCount }: Arch
     prevArchivePopoverOpen.current = archivePopoverOpen
   }, [archivePopoverOpen])
 
+  // Only show archive button when there are archived workspaces
   if (archivedChatsCount === 0) return null
 
   return (
@@ -1263,7 +1264,7 @@ const ArchiveSection = memo(function ArchiveSection({ archivedChatsCount }: Arch
           />
         </div>
       </TooltipTrigger>
-      <TooltipContent>Archive</TooltipContent>
+      <TooltipContent>Archive ({archivedChatsCount})</TooltipContent>
     </Tooltip>
   )
 })
