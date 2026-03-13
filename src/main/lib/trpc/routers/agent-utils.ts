@@ -216,6 +216,14 @@ export async function scanAgentsDirectory(
           const content = await fs.readFile(agentPath, "utf-8")
           const parsed = parseAgentMd(content, entry.name)
 
+          console.log(`[agents] Parsed ${entry.name}:`, {
+            name: parsed.name,
+            description: parsed.description?.substring(0, 50),
+            promptLength: parsed.prompt?.length,
+            hasDescription: !!parsed.description,
+            hasPrompt: !!parsed.prompt,
+          })
+
           if (parsed.description && parsed.prompt) {
             // For project agents, show relative path; for user agents, show ~/.claude/... path
             let displayPath: string
@@ -270,10 +278,14 @@ export function clearAgentCache() {
  * Build agents Record for SDK Options
  * This properly registers agents with the SDK so Claude can invoke them via Task tool
  * OPTIMIZATION: Caches loaded agents to avoid re-reading from disk
+ * @param agentNames - List of agent names to load
+ * @param cwd - Current working directory for project-specific agents
+ * @param useInheritModel - When true, forces all agents to use "inherit" model (for custom model support)
  */
 export async function buildAgentsOption(
   agentNames: string[],
-  cwd?: string
+  cwd?: string,
+  useInheritModel?: boolean
 ): Promise<
   Record<
     string,
@@ -307,7 +319,9 @@ export async function buildAgentsOption(
         description: agent.description,
         prompt: agent.prompt,
         ...(agent.tools && { tools: agent.tools }),
-        ...(agent.model && { model: agent.model }),
+        // When using custom model, force all agents to inherit from parent
+        // This ensures subagents use the custom model instead of hardcoded "sonnet"/"haiku"
+        model: useInheritModel ? "inherit" : agent.model,
       }
     }
   }
