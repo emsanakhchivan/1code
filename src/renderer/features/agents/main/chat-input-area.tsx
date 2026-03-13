@@ -50,12 +50,18 @@ import {
   modelProfilesAtom,
   activeProfileIdAtom,
   activeCustomModelIdAtom,
+  subChatProfileIdAtomFamily,
+  subChatCustomModelIdAtomFamily,
   normalizeCodexApiKey,
   selectedOllamaModelAtom,
   showOfflineModeFeaturesAtom,
+  lastUsedModelAtom,
+  lastUsedAgentProviderAtom,
+  createModelIdentifier,
 } from "../../../lib/atoms"
 import { trpc } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
+import { appStore } from "../../../lib/jotai-store"
 import {
   lastSelectedCodexModelIdAtom,
   lastSelectedCodexThinkingAtom,
@@ -64,6 +70,9 @@ import {
   subChatCodexThinkingAtomFamily,
   subChatModelIdAtomFamily,
   subChatModeAtomFamily,
+  subChatProfileIdsStorageAtom,
+  subChatCustomModelIdsStorageAtom,
+  subChatModelIdsStorageAtom,
   getNextMode,
   type AgentMode,
   type SubChatFileChange,
@@ -477,6 +486,8 @@ export const ChatInputArea = memo(function ChatInputArea({
   const setLastSelectedModelId = useSetAtom(lastSelectedModelIdAtom)
   const setLastSelectedCodexModelId = useSetAtom(lastSelectedCodexModelIdAtom)
   const setLastSelectedCodexThinking = useSetAtom(lastSelectedCodexThinkingAtom)
+  const setLastUsedModel = useSetAtom(lastUsedModelAtom)
+  const setLastUsedAgentProvider = useSetAtom(lastUsedAgentProviderAtom)
   const [selectedOllamaModel, setSelectedOllamaModel] = useAtom(selectedOllamaModelAtom)
   const availableModels = useAvailableModels()
   const [selectedModel, setSelectedModel] = useState(
@@ -491,7 +502,7 @@ export const ChatInputArea = memo(function ChatInputArea({
     if (model && model.id !== selectedModel.id) {
       setSelectedModel(model)
     }
-  }, [availableModels.models, selectedModel.id, selectedSubChatModelId])
+  }, [availableModels.models, selectedSubChatModelId])
 
   // Materialize the resolved Claude model into per-subChat storage once mounted.
   // This prevents later global default changes from affecting existing sub-chats.
@@ -579,11 +590,59 @@ export const ChatInputArea = memo(function ChatInputArea({
 
   const customClaudeConfig = useAtomValue(activeConfigAtom)
   const hasCustomClaudeConfig = Boolean(customClaudeConfig)
-  
-  // Custom model profiles
+
+  // Custom model profiles - per-subChat to ensure isolation
   const [modelProfiles, setModelProfiles] = useAtom(modelProfilesAtom)
-  const [activeProfileId, setActiveProfileId] = useAtom(activeProfileIdAtom)
-  const [activeCustomModelId, setActiveCustomModelId] = useAtom(activeCustomModelIdAtom)
+  const subChatProfileIdAtom = useMemo(
+    () => subChatProfileIdAtomFamily(subChatId),
+    [subChatId],
+  )
+  const [activeProfileId, setActiveProfileId] = useAtom(subChatProfileIdAtom)
+  const subChatCustomModelIdAtom = useMemo(
+    () => subChatCustomModelIdAtomFamily(subChatId),
+    [subChatId],
+  )
+  const [activeCustomModelId, setActiveCustomModelId] = useAtom(subChatCustomModelIdAtom)
+
+  // CRITICAL: Sync from storage atoms when subChatId changes
+  // This fixes the issue where appStore.set() updates storage but React doesn't see it
+  // because the atom family instance wasn't created yet when we wrote to storage
+  useEffect(() => {
+    // Read directly from storage atoms (which were updated by handleCreateNew)
+    const storedProfiles = appStore.get(subChatProfileIdsStorageAtom)
+    const storedCustoms = appStore.get(subChatCustomModelIdsStorageAtom)
+    const storedModels = appStore.get(subChatModelIdsStorageAtom)
+
+    const profileId = storedProfiles[subChatId] ?? null
+    const customModelId = storedCustoms[subChatId] ?? null
+    const modelId = storedModels[subChatId]
+
+    console.log("[ChatInputArea] Sync from storage:", { subChatId, profileId, customModelId, modelId })
+
+    // Update the atom family values if they differ
+    if (profileId !== activeProfileId) {
+      setActiveProfileId(profileId)
+    }
+    if (customModelId !== activeCustomModelId) {
+      setActiveCustomModelId(customModelId)
+    }
+    if (modelId && modelId !== selectedSubChatModelId) {
+      setSelectedSubChatModelId(modelId)
+    }
+  }, [subChatId]) // Only run when subChatId changes, not on atom changes
+
+  // Debug: Log atom values when subChatId changes
+  useEffect(() => {
+    console.log("[ChatInputArea] subChatId changed:", subChatId, "activeProfileId:", activeProfileId, "activeCustomModelId:", activeCustomModelId)
+  }, [subChatId, activeProfileId, activeCustomModelId])
+
+  // When custom model is selected for this sub-chat, ensure selectedSubChatModelId is "custom"
+  useEffect(() => {
+    if (activeProfileId && activeCustomModelId && selectedSubChatModelId !== "custom") {
+      setSelectedSubChatModelId("custom")
+    }
+  }, [activeProfileId, activeCustomModelId, selectedSubChatModelId, setSelectedSubChatModelId])
+
   const customProfiles = modelProfiles.filter(p => !p.isOffline)
   
   // Helper to find active custom model
@@ -1619,6 +1678,9 @@ export const ChatInputArea = memo(function ChatInputArea({
                           setSelectedModel(model)
                           setSelectedSubChatModelId(model.id)
                           setLastSelectedModelId(model.id)
+                          // Persist last used model for new chats
+                          setLastUsedModel(createModelIdentifier("claude", model.id))
+                          setLastUsedAgentProvider("claude-code")
                           // Clear profile selection when selecting standard model
                           setActiveProfileId(null)
                         },
@@ -1627,7 +1689,12 @@ export const ChatInputArea = memo(function ChatInputArea({
                         ollamaModels: availableModels.ollamaModels,
                         selectedOllamaModel: currentOllamaModel,
                         recommendedOllamaModel: availableModels.recommendedModel,
-                        onSelectOllamaModel: setSelectedOllamaModel,
+                        onSelectOllamaModel: (modelName) => {
+                          setSelectedOllamaModel(modelName)
+                          // Persist last used model for new chats
+                          setLastUsedModel(createModelIdentifier("ollama", modelName))
+                          setLastUsedAgentProvider("claude-code")
+                        },
                         isConnected: isClaudeConnected,
                         thinkingEnabled,
                         onThinkingChange: setThinkingEnabled,
@@ -1638,6 +1705,9 @@ export const ChatInputArea = memo(function ChatInputArea({
                         onSelectCustomModel: (profileId, modelId) => {
                           setActiveProfileId(profileId)
                           setActiveCustomModelId(modelId)
+                          // Persist last used model for new chats
+                          setLastUsedModel(createModelIdentifier("custom", profileId, modelId))
+                          setLastUsedAgentProvider("claude-code")
                         },
                         onClearCustomModel: () => {
                           setActiveProfileId(null)
@@ -1662,6 +1732,9 @@ export const ChatInputArea = memo(function ChatInputArea({
                           setSelectedSubChatCodexThinking(nextThinking)
                           setLastSelectedCodexModelId(model.id)
                           setLastSelectedCodexThinking(nextThinking)
+                          // Persist last used model for new chats
+                          setLastUsedModel(createModelIdentifier("codex", model.id))
+                          setLastUsedAgentProvider("codex")
                         },
                         selectedThinking: selectedCodexThinking,
                         onSelectThinking: (thinking) => {
