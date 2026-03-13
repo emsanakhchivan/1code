@@ -20,6 +20,7 @@ import {
   FlaskFilledIcon,
   FolderFilledIcon,
   KeyboardFilledIcon,
+  MonitorFilledIcon,
   OriginalMCPIcon,
   PluginFilledIcon,
   SkillIconFilled,
@@ -72,6 +73,11 @@ const ADVANCED_TABS_BASE = [
     id: "models" as SettingsTab,
     label: "Models",
     icon: BrainFilledIcon,
+  },
+  {
+    id: "monitor" as SettingsTab,
+    label: "Monitor",
+    icon: MonitorFilledIcon,
   },
   {
     id: "skills" as SettingsTab,
