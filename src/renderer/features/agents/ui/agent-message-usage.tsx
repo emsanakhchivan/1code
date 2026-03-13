@@ -7,9 +7,13 @@ import {
   HoverCardTrigger,
 } from "../../../components/ui/hover-card"
 import { cn } from "../../../lib/utils"
+import { AgentModelTag } from "./agent-model-tag"
 
 export interface AgentMessageMetadata {
   model?: string
+  modelId?: string
+  modelProvider?: string
+  modelProfileName?: string
   sessionId?: string
   totalCostUsd?: number
   inputTokens?: number
@@ -55,6 +59,9 @@ export const AgentMessageUsage = memo(function AgentMessageUsage({
 
   const {
     model,
+    modelId,
+    modelProvider,
+    modelProfileName,
     inputTokens = 0,
     outputTokens = 0,
     totalTokens = 0,
@@ -63,8 +70,10 @@ export const AgentMessageUsage = memo(function AgentMessageUsage({
   } = metadata
 
   const hasUsage = inputTokens > 0 || outputTokens > 0
+  const hasModelInfo = modelId || model || modelProfileName
 
-  if (!hasUsage) return null
+  // Show model tag even without usage data
+  if (!hasUsage && !hasModelInfo) return null
 
   const normalizedModel = typeof model === "string" ? model.toLowerCase() : ""
   const isCodexModel =
@@ -74,59 +83,72 @@ export const AgentMessageUsage = memo(function AgentMessageUsage({
     : totalTokens || inputTokens + outputTokens
 
   return (
-    <HoverCard openDelay={400} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <button
-          tabIndex={-1}
-          className={cn(
-            "h-5 px-1.5 flex items-center text-[10px] rounded-md",
-            "text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50",
-            "transition-[background-color,transform] duration-150 ease-out",
-          )}
-        >
-          <span className="font-mono">{formatTokens(displayTokens)}</span>
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent
-        sideOffset={4}
-        align="end"
-        className="w-auto pt-2 px-2 pb-0 shadow-sm rounded-lg border-border/50 overflow-hidden"
-      >
-        <div className="space-y-1.5 pb-2">
-          {/* Status & Duration group */}
-          {(resultSubtype || (durationMs !== undefined && durationMs > 0)) && (
-            <div className="space-y-1">
-              {resultSubtype && (
-                <div className="flex justify-between text-xs gap-4">
-                  <span className="text-muted-foreground">Status:</span>
-                  <span className="font-mono text-foreground">
-                    {resultSubtype === "success" ? "Success" : "Failed"}
-                  </span>
+    <div className="flex items-center gap-0.5">
+      {/* Model tag */}
+      <AgentModelTag
+        modelId={modelId || model}
+        modelProvider={modelProvider}
+        modelProfileName={modelProfileName}
+        isStreaming={isStreaming}
+      />
+
+      {/* Token usage */}
+      {hasUsage && (
+        <HoverCard openDelay={400} closeDelay={100}>
+          <HoverCardTrigger asChild>
+            <button
+              tabIndex={-1}
+              className={cn(
+                "h-5 px-1.5 flex items-center text-[10px] rounded-md",
+                "text-muted-foreground/60 hover:text-muted-foreground hover:bg-muted/50",
+                "transition-[background-color,transform] duration-150 ease-out",
+              )}
+            >
+              <span className="font-mono">{formatTokens(displayTokens)}</span>
+            </button>
+          </HoverCardTrigger>
+          <HoverCardContent
+            sideOffset={4}
+            align="end"
+            className="w-auto pt-2 px-2 pb-0 shadow-sm rounded-lg border-border/50 overflow-hidden"
+          >
+            <div className="space-y-1.5 pb-2">
+              {/* Status & Duration group */}
+              {(resultSubtype || (durationMs !== undefined && durationMs > 0)) && (
+                <div className="space-y-1">
+                  {resultSubtype && (
+                    <div className="flex justify-between text-xs gap-4">
+                      <span className="text-muted-foreground">Status:</span>
+                      <span className="font-mono text-foreground">
+                        {resultSubtype === "success" ? "Success" : "Failed"}
+                      </span>
+                    </div>
+                  )}
+
+                  {durationMs !== undefined && durationMs > 0 && (
+                    <div className="flex justify-between text-xs gap-4">
+                      <span className="text-muted-foreground">Duration:</span>
+                      <span className="font-mono text-foreground">
+                        {formatDuration(durationMs)}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
-              {durationMs !== undefined && durationMs > 0 && (
-                <div className="flex justify-between text-xs gap-4">
-                  <span className="text-muted-foreground">Duration:</span>
-                  <span className="font-mono text-foreground">
-                    {formatDuration(durationMs)}
+              {/* Tokens group */}
+              {displayTokens > 0 && (
+                <div className="flex justify-between text-xs gap-4 pt-1.5 mt-1 border-t border-border/50">
+                  <span className="text-muted-foreground">Tokens:</span>
+                  <span className="font-mono font-medium text-foreground">
+                    {displayTokens.toLocaleString()}
                   </span>
                 </div>
               )}
             </div>
-          )}
-
-          {/* Tokens group */}
-          {displayTokens > 0 && (
-            <div className="flex justify-between text-xs gap-4 pt-1.5 mt-1 border-t border-border/50">
-              <span className="text-muted-foreground">Tokens:</span>
-              <span className="font-mono font-medium text-foreground">
-                {displayTokens.toLocaleString()}
-              </span>
-            </div>
-          )}
-        </div>
-      </HoverCardContent>
-    </HoverCard>
+          </HoverCardContent>
+        </HoverCard>
+      )}
+    </div>
   )
 })
