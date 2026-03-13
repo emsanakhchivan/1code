@@ -19,7 +19,7 @@ function TextShimmerComponent({
   spread = 2,
   delay = 0,
 }: TextShimmerProps) {
-  const MotionComponent = motion(Component as keyof JSX.IntrinsicElements)
+  const MotionComponent = motion.create(Component as keyof JSX.IntrinsicElements)
   const [shouldAnimate, setShouldAnimate] = useState(delay === 0)
 
   useEffect(() => {
