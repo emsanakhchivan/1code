@@ -17,7 +17,13 @@ import {
   pendingUserQuestionsAtom,
   undoStackAtom,
   subChatModeAtomFamily,
+  subChatModelIdAtomFamily,
+  subChatProfileIdAtomFamily,
+  subChatCustomModelIdAtomFamily,
   suppressInputFocusAtom,
+  subChatModelIdsStorageAtom,
+  subChatProfileIdsStorageAtom,
+  subChatCustomModelIdsStorageAtom,
   type UndoItem,
 } from "../agents/atoms"
 import {
@@ -32,6 +38,14 @@ import {
   isFullscreenAtom,
   chatSourceModeAtom,
   defaultAgentModeAtom,
+  lastSelectedModelIdAtom,
+  activeProfileIdAtom,
+  activeCustomModelIdAtom,
+  defaultModelForNewChatsAtom,
+  lastUsedModelAtom,
+  lastUsedAgentProviderAtom,
+  parseModelIdentifier,
+  createModelIdentifier,
 } from "../../lib/atoms"
 import { trpc } from "../../lib/trpc"
 import { appStore } from "../../lib/jotai-store"
@@ -43,6 +57,7 @@ import { useShallow } from "zustand/react/shallow"
 import {
   PlusIcon,
   ArchiveIcon,
+  UnarchiveIcon,
   IconDoubleChevronLeft,
   IconSpinner,
   LoadingDot,
@@ -51,6 +66,7 @@ import {
   IconOpenSidebar,
   ClockIcon,
   QuestionIcon,
+  IconChevronDown,
 } from "../../components/ui/icons"
 import {
   Tooltip,
@@ -86,6 +102,7 @@ import { toast } from "sonner"
 import { AgentsRenameSubChatDialog } from "../agents/components/agents-rename-subchat-dialog"
 import { SearchCombobox } from "../../components/ui/search-combobox"
 import { SubChatContextMenu } from "../agents/ui/sub-chat-context-menu"
+import { ChatDetailsPopover } from "../agents/ui/chat-details-popover"
 import { formatTimeAgo } from "../agents/utils/format-time-ago"
 import { pluralize } from "../agents/utils/pluralize"
 import { useHotkeys } from "react-hotkeys-hook"
@@ -231,6 +248,9 @@ export function AgentsSubChatsSidebar({
       closeSplit: state.closeSplit,
     }))
   )
+
+  // Debug: log parentChatId state
+  console.log("[AgentsSubChatsSidebar] parentChatId:", parentChatId)
   const [loadingSubChats] = useAtom(loadingSubChatsAtom)
   const subChatFiles = useAtomValue(subChatFilesAtom)
   const selectedTeamId = useAtomValue(selectedTeamIdAtom)
@@ -322,6 +342,70 @@ export function AgentsSubChatsSidebar({
   const [subChatToArchive, setSubChatToArchive] = useState<SubChatMeta | null>(
     null,
   )
+
+  // Archived sub-chats section state
+  const [archivedExpanded, setArchivedExpanded] = useState(false)
+
+  // Fetch archived sub-chats for this workspace
+  const { data: archivedSubChats = [] } = trpc.chats.listArchivedSubChats.useQuery(
+    { chatId: parentChatId! },
+    { enabled: !!parentChatId },
+  )
+
+  // Archive/restore mutations
+  const archiveSubChatMutation = trpc.chats.archiveSubChat.useMutation({
+    onSuccess: () => {
+      utils.chats.listArchivedSubChats.invalidate()
+    },
+  })
+  const restoreSubChatMutation = trpc.chats.restoreSubChat.useMutation({
+    onSuccess: () => {
+      utils.chats.listArchivedSubChats.invalidate()
+    },
+  })
+
+  // Handle open archived sub-chat (just open, don't restore)
+  const handleOpenArchivedSubChat = useCallback((subChat: { id: string; name: string | null }) => {
+    // Add to allSubChats if not already there (so it shows in sidebar)
+    const store = useAgentSubChatStore.getState()
+    const exists = store.allSubChats.some(sc => sc.id === subChat.id)
+    if (!exists) {
+      store.addToAllSubChats({
+        id: subChat.id,
+        name: subChat.name || "New Chat",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        mode: "agent",
+      })
+    }
+
+    // Open the tab
+    store.addToOpenSubChats(subChat.id)
+    store.setActiveSubChat(subChat.id)
+  }, [])
+
+  // Handle restore archived sub-chat (restore from archive)
+  const handleRestoreArchivedSubChat = useCallback((subChatId: string, subChat: { id: string; name: string | null }) => {
+    // Restore in database
+    restoreSubChatMutation.mutate({ id: subChatId })
+
+    // Add to allSubChats in store (so it appears in the main list)
+    useAgentSubChatStore.getState().addToAllSubChats({
+      id: subChat.id,
+      name: subChat.name || "New Chat",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      mode: "agent",
+    })
+
+    // Add back to open tabs
+    useAgentSubChatStore.getState().addToOpenSubChats(subChatId)
+    useAgentSubChatStore.getState().setActiveSubChat(subChatId)
+  }, [restoreSubChatMutation])
+
+  // Details popover state
+  const [detailsSubChatId, setDetailsSubChatId] = useState<string | null>(null)
+  const [detailsAnchorElement, setDetailsAnchorElement] = useState<HTMLElement | null>(null)
 
   // Multi-select state
   const [selectedSubChatIds, setSelectedSubChatIds] = useAtom(
@@ -525,7 +609,7 @@ export function AgentsSubChatsSidebar({
 
   const handleArchiveSubChat = useCallback(
     (subChatId: string) => {
-      // If this is the last open subchat, show confirmation dialog
+      // If this is the last open subchat, show confirmation dialog for workspace archive
       if (openSubChats.length === 1) {
         const subChat = allSubChats.find((sc) => sc.id === subChatId)
         if (subChat) {
@@ -534,8 +618,17 @@ export function AgentsSubChatsSidebar({
         }
         return
       }
-      // Archive = remove from open tabs (but keep in allSubChats for history)
+
+      // Archive in database (set archivedAt)
+      archiveSubChatMutation.mutate({ id: subChatId })
+
+      // Remove from open tabs
       useAgentSubChatStore.getState().removeFromOpenSubChats(subChatId)
+
+      // Remove from allSubChats in store
+      useAgentSubChatStore.getState().setAllSubChats(
+        useAgentSubChatStore.getState().allSubChats.filter((sc) => sc.id !== subChatId)
+      )
 
       // Add to unified undo stack for Cmd+Z
       if (parentChatId) {
@@ -553,7 +646,7 @@ export function AgentsSubChatsSidebar({
         }])
       }
     },
-    [openSubChats.length, allSubChats, parentChatId, setUndoStack],
+    [openSubChats.length, allSubChats, parentChatId, setUndoStack, archiveSubChatMutation],
   )
 
   const handleConfirmArchiveAgent = useCallback(() => {
@@ -564,6 +657,17 @@ export function AgentsSubChatsSidebar({
     setArchiveAgentDialogOpen(false)
     setSubChatToArchive(null)
   }, [parentChatId, archiveChatMutation])
+
+  // Handle showing details popover
+  const handleShowDetails = useCallback((subChatId: string, element: HTMLElement) => {
+    console.log("[handleShowDetails] Called:", { subChatId, hasElement: !!element, parentChatId })
+    if (!parentChatId) {
+      console.error("[handleShowDetails] parentChatId is null! Cannot show details.")
+      return
+    }
+    setDetailsAnchorElement(element)
+    setDetailsSubChatId(subChatId)
+  }, [parentChatId])
 
   // Handle sub-chat card hover for truncated name tooltip (1s delay)
   // Uses direct DOM manipulation instead of state to avoid re-renders
@@ -717,6 +821,8 @@ export function AgentsSubChatsSidebar({
   const handleCreateNew = async () => {
     if (!parentChatId) return
 
+    console.log("[handleCreateNew] STARTING - parentChatId:", parentChatId)
+
     const store = useAgentSubChatStore.getState()
 
     let newId: string
@@ -735,11 +841,64 @@ export function AgentsSubChatsSidebar({
       newId = newSubChat.id
     }
 
+    console.log("[handleCreateNew] new subChatId:", newId)
+
     // Track this subchat as just created for typewriter effect
     setJustCreatedIds((prev) => new Set([...prev, newId]))
 
     // Initialize atomFamily mode for the new sub-chat
     appStore.set(subChatModeAtomFamily(newId), defaultAgentMode)
+
+    // Initialize model for the new sub-chat based on defaultModelForNewChats setting
+    // Use atoms (Jotai store) instead of direct localStorage to handle JSON parsing correctly
+    const defaultModelPref = appStore.get(defaultModelForNewChatsAtom)
+    const lastUsed = appStore.get(lastUsedModelAtom)
+
+    console.log("[handleCreateNew] atoms:", { defaultModelPref, lastUsed })
+
+    // Determine which model to use
+    let modelIdentifier: string | null = null
+
+    if (defaultModelPref === "last-used" && lastUsed) {
+      modelIdentifier = lastUsed
+    } else if (defaultModelPref && defaultModelPref !== "last-used") {
+      modelIdentifier = defaultModelPref
+    }
+
+    console.log("[handleCreateNew] modelIdentifier:", modelIdentifier)
+
+    if (modelIdentifier) {
+      const parsed = parseModelIdentifier(modelIdentifier)
+      console.log("[handleCreateNew] parsed:", parsed)
+
+      // Write directly to storage atoms to ensure React components see the updates
+      // This is necessary because atomFamily atoms may not be subscribed yet when we set values
+      if (parsed.provider === "claude") {
+        const currentModels = appStore.get(subChatModelIdsStorageAtom)
+        appStore.set(subChatModelIdsStorageAtom, { ...currentModels, [newId]: parsed.modelId })
+        const currentProfiles = appStore.get(subChatProfileIdsStorageAtom)
+        appStore.set(subChatProfileIdsStorageAtom, { ...currentProfiles, [newId]: null })
+        const currentCustoms = appStore.get(subChatCustomModelIdsStorageAtom)
+        appStore.set(subChatCustomModelIdsStorageAtom, { ...currentCustoms, [newId]: null })
+        console.log("[handleCreateNew] Set Claude model:", parsed.modelId)
+      } else if (parsed.provider === "custom" && parsed.customProfileId && parsed.customModelId) {
+        const currentModels = appStore.get(subChatModelIdsStorageAtom)
+        appStore.set(subChatModelIdsStorageAtom, { ...currentModels, [newId]: "custom" })
+        const currentProfiles = appStore.get(subChatProfileIdsStorageAtom)
+        appStore.set(subChatProfileIdsStorageAtom, { ...currentProfiles, [newId]: parsed.customProfileId })
+        const currentCustoms = appStore.get(subChatCustomModelIdsStorageAtom)
+        appStore.set(subChatCustomModelIdsStorageAtom, { ...currentCustoms, [newId]: parsed.customModelId })
+        console.log("[handleCreateNew] Set custom model:", parsed.customProfileId, parsed.customModelId)
+      } else if (parsed.provider === "ollama") {
+        const currentModels = appStore.get(subChatModelIdsStorageAtom)
+        appStore.set(subChatModelIdsStorageAtom, { ...currentModels, [newId]: "custom" })
+        const currentProfiles = appStore.get(subChatProfileIdsStorageAtom)
+        appStore.set(subChatProfileIdsStorageAtom, { ...currentProfiles, [newId]: "ollama" })
+        const currentCustoms = appStore.get(subChatCustomModelIdsStorageAtom)
+        appStore.set(subChatCustomModelIdsStorageAtom, { ...currentCustoms, [newId]: parsed.modelId })
+        console.log("[handleCreateNew] Set Ollama model:", parsed.modelId)
+      }
+    }
 
     // Add to allSubChats with placeholder name
     store.addToAllSubChats({
@@ -752,6 +911,8 @@ export function AgentsSubChatsSidebar({
     // Add to open tabs and set as active
     store.addToOpenSubChats(newId)
     store.setActiveSubChat(newId)
+
+    console.log("[handleCreateNew] DONE")
   }
 
   const handleSelectFromHistory = useCallback((subChat: SubChatMeta) => {
@@ -1309,6 +1470,7 @@ export function AgentsSubChatsSidebar({
                               <ContextMenuTrigger asChild>
                                 <div
                                   data-subchat-index={globalIndex}
+                                  data-subchat-id={subChat.id}
                                   onClick={(e) =>
                                     handleSubChatItemClick(
                                       subChat.id,
@@ -1543,6 +1705,7 @@ export function AgentsSubChatsSidebar({
                                   splitPaneCount={splitPaneIds.length}
                                   isActiveTab={isActive}
                                   isSplitTab={isSplitTab}
+                                  onShowDetails={handleShowDetails}
                                 />
                               )}
                             </ContextMenu>
@@ -1613,6 +1776,7 @@ export function AgentsSubChatsSidebar({
                               <ContextMenuTrigger asChild>
                                 <div
                                   data-subchat-index={globalIndex}
+                                  data-subchat-id={subChat.id}
                                   onClick={(e) =>
                                     handleSubChatItemClick(
                                       subChat.id,
@@ -1847,6 +2011,7 @@ export function AgentsSubChatsSidebar({
                                   splitPaneCount={splitPaneIds.length}
                                   isActiveTab={isActive}
                                   isSplitTab={isSplitTab}
+                                  onShowDetails={handleShowDetails}
                                 />
                               )}
                             </ContextMenu>
@@ -1866,6 +2031,59 @@ export function AgentsSubChatsSidebar({
                   </div>
                 </div>
               ) : null}
+
+              {/* Archived Sub-chats Section */}
+              {archivedSubChats.length > 0 && !searchQuery.trim() && (
+                <div className={cn("mt-4 mb-2", isMultiSelectMode ? "px-0" : "-mx-1")}>
+                  <button
+                    onClick={() => setArchivedExpanded(!archivedExpanded)}
+                    className={cn(
+                      "flex items-center gap-1 h-6 w-full text-left",
+                      isMultiSelectMode ? "px-3" : "px-2",
+                    )}
+                  >
+                    <IconChevronDown
+                      className={cn(
+                        "h-3 w-3 text-muted-foreground transition-transform duration-200",
+                        archivedExpanded ? "" : "-rotate-90",
+                      )}
+                    />
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Archived ({archivedSubChats.length})
+                    </span>
+                  </button>
+
+                  {archivedExpanded && (
+                    <div className={cn("mt-1", isMultiSelectMode ? "px-0" : "px-1")}>
+                      {archivedSubChats.map((subChat) => (
+                        <div
+                          key={subChat.id}
+                          className={cn(
+                            "flex items-center gap-2 py-1.5 rounded-md group cursor-pointer",
+                            isMultiSelectMode ? "px-2" : "px-1",
+                            "text-muted-foreground hover:bg-foreground/5 hover:text-foreground transition-colors",
+                          )}
+                          onClick={() => handleOpenArchivedSubChat(subChat)}
+                        >
+                          <span className="flex-1 truncate text-sm">
+                            {subChat.name || "New Chat"}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleRestoreArchivedSubChat(subChat.id, subChat)
+                            }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                            title="Restore from archive"
+                          >
+                            <UnarchiveIcon className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </>
         )}
@@ -1957,6 +2175,22 @@ export function AgentsSubChatsSidebar({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Details Popover */}
+      {detailsSubChatId && parentChatId && (
+        <ChatDetailsPopover
+          subChatId={detailsSubChatId}
+          chatId={parentChatId}
+          open={!!detailsSubChatId}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDetailsSubChatId(null)
+              setDetailsAnchorElement(null)
+            }
+          }}
+          anchorElement={detailsAnchorElement}
+        />
+      )}
 
       {/* SubChat name tooltip portal - always rendered, visibility controlled via ref */}
       {typeof document !== "undefined" &&
