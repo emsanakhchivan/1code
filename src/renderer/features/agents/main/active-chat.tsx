@@ -152,6 +152,8 @@ import {
   subChatCodexModelIdAtomFamily,
   subChatCodexThinkingAtomFamily,
   subChatModelIdAtomFamily,
+  subChatProfileIdAtomFamily,
+  subChatCustomModelIdAtomFamily,
   subChatModeAtomFamily,
   suppressInputFocusAtom,
   undoStackAtom,
@@ -2722,6 +2724,9 @@ const ChatViewInner = memo(function ChatViewInner({
   // Pre-compute token data for ChatInputArea to avoid passing unstable messages array.
   // Prefer the latest assistant metadata that actually includes token/context fields.
   // This keeps the indicator stable while a new assistant message is streaming.
+  //
+  // IMPORTANT: inputTokens is CUMULATIVE (shows total context at that point in time)
+  // Do NOT sum across messages - just use the latest value from the most recent message.
   const messageTokenData = useMemo(() => {
     const lastAssistantWithTokenData = [...messages].reverse().find((msg) => {
       if (msg.role !== "assistant" || !msg.metadata) return false
@@ -2756,19 +2761,16 @@ const ChatViewInner = memo(function ChatViewInner({
         }
       | undefined
 
-    const cacheReadInputTokens = metadata?.cacheReadInputTokens || 0
-    const cacheCreationInputTokens = metadata?.cacheCreationInputTokens || 0
     const codexInputTokensFromTotal =
       metadata?.totalTokens !== undefined
         ? Math.max(0, metadata.totalTokens - (metadata?.outputTokens ?? 0))
         : undefined
 
+    // inputTokens already includes cache_read + cache_creation (calculated in transform.ts)
     const totalInputTokens =
       provider === "codex"
         ? (codexInputTokensFromTotal ?? metadata?.inputTokens ?? 0)
-        : (metadata?.inputTokens || 0) +
-          cacheReadInputTokens +
-          cacheCreationInputTokens
+        : metadata?.inputTokens ?? 0
     const totalOutputTokens = metadata?.outputTokens || 0
     const totalCostUsd = metadata?.totalCostUsd || 0
     const contextWindow = metadata?.modelContextWindow
@@ -3628,13 +3630,20 @@ const ChatViewInner = memo(function ChatViewInner({
 
   // Auto-trigger AI response when we have initial message but no response yet
   // Also trigger auto-rename for initial sub-chat with pre-populated message
-  // IMPORTANT: Skip if there's an active streamId (prevents double-generation on resume)
+  // IMPORTANT: Only auto-generate for chats created in THIS session (justCreatedIds)
+  // This prevents re-sending old messages after refresh/restart when previous attempt failed
+  const justCreatedIds = useAtomValue(justCreatedIdsAtom)
+
   useEffect(() => {
+    // Skip if not a newly created chat in this session
+    const isJustCreated = justCreatedIds.has(subChatId)
+
     if (
       messages.length === 1 &&
       status === "ready" &&
       !streamId &&
-      !hasTriggeredAutoGenerateRef.current
+      !hasTriggeredAutoGenerateRef.current &&
+      isJustCreated // Only auto-generate for newly created chats
     ) {
       hasTriggeredAutoGenerateRef.current = true
       // Trigger rename for pre-populated initial message (from createAgentChat)
@@ -3658,6 +3667,7 @@ const ChatViewInner = memo(function ChatViewInner({
     onAutoRename,
     streamId,
     subChatId,
+    justCreatedIds,
   ])
 
   // Initialize scroll position on mount or tab re-activation.
@@ -6643,10 +6653,28 @@ Make sure to preserve all functionality from both branches when resolving confli
         // Remote sandbox chat: use HTTP SSE transport
         const subChatName = subChat?.name || "Chat"
         const selectedModelId = appStore.get(subChatModelIdAtomFamily(subChatId))
-        const modelString = MODEL_ID_MAP[selectedModelId] || MODEL_ID_MAP["opus"]
+
+        // Handle custom models
+        let modelString: string
+        let customModelConfig: { profileId?: string; modelId?: string } | undefined
+
+        if (selectedModelId === "custom") {
+          const profileId = appStore.get(subChatProfileIdAtomFamily(subChatId))
+          const customModelId = appStore.get(subChatCustomModelIdAtomFamily(subChatId))
+          if (profileId && customModelId) {
+            modelString = "custom"
+            customModelConfig = { profileId, modelId: customModelId }
+          } else {
+            modelString = MODEL_ID_MAP["opus"]
+          }
+        } else {
+          modelString = MODEL_ID_MAP[selectedModelId] || MODEL_ID_MAP["opus"]
+        }
+
         console.log("[getOrCreateChat] Using RemoteChatTransport", {
           sandboxUrl: chatSandboxUrl,
           model: modelString,
+          customModel: customModelConfig,
         })
         transport = new RemoteChatTransport({
           chatId,
@@ -6655,6 +6683,7 @@ Make sure to preserve all functionality from both branches when resolving confli
           sandboxUrl: chatSandboxUrl,
           mode: subChatMode,
           model: modelString,
+          customModel: customModelConfig,
         })
       } else if (worktreePath) {
         if (chatProvider === "codex") {
@@ -6669,12 +6698,25 @@ Make sure to preserve all functionality from both branches when resolving confli
           })
         } else {
           // Local worktree chat: use IPC transport
+          // Get model info for custom models
+          const selectedModelId = appStore.get(subChatModelIdAtomFamily(subChatId))
+          let customModelConfig: { profileId?: string; modelId?: string } | undefined
+
+          if (selectedModelId === "custom") {
+            const profileId = appStore.get(subChatProfileIdAtomFamily(subChatId))
+            const customModelId = appStore.get(subChatCustomModelIdAtomFamily(subChatId))
+            if (profileId && customModelId) {
+              customModelConfig = { profileId, modelId: customModelId }
+            }
+          }
+
           transport = new IPCChatTransport({
             chatId,
             subChatId,
             cwd: worktreePath,
             projectPath,
             mode: subChatMode,
+            customModel: customModelConfig,
           })
         }
       }
@@ -6693,6 +6735,8 @@ Make sure to preserve all functionality from both branches when resolving confli
           useStreamingStatusStore.getState().setStatus(subChatId, "ready")
           syncFinishedMessagesToChatCache(subChatId, newChat)
           pruneIfDetachedAndIdle(subChatId, chatId)
+          // Clear streamId to prevent resume on refresh after error
+          agentChatStore.setStreamId(subChatId, null)
         },
         // Clear loading when streaming completes (works even if component unmounted)
         onFinish: () => {
@@ -6756,6 +6800,9 @@ Make sure to preserve all functionality from both branches when resolving confli
           fetchDiffStatsRef.current()
 
           pruneIfDetachedAndIdle(subChatId, chatId)
+
+          // Clear streamId to prevent resume on refresh after stream completes
+          agentChatStore.setStreamId(subChatId, null)
 
           // Note: sidebar timestamp update is handled via optimistic update in handleSend
           // No need to refetch here as it would overwrite the optimistic update with stale data
@@ -6903,6 +6950,15 @@ Make sure to preserve all functionality from both branches when resolving confli
       subChatCodexThinkingAtomFamily(newId),
       appStore.get(subChatCodexThinkingAtomFamily(sourceSubChatId)),
     )
+    // Inherit custom model preferences
+    appStore.set(
+      subChatProfileIdAtomFamily(newId),
+      appStore.get(subChatProfileIdAtomFamily(sourceSubChatId)),
+    )
+    appStore.set(
+      subChatCustomModelIdAtomFamily(newId),
+      appStore.get(subChatCustomModelIdAtomFamily(sourceSubChatId)),
+    )
 
     // Add to open tabs and set as active
     store.addToOpenSubChats(newId)
@@ -6927,8 +6983,25 @@ Make sure to preserve all functionality from both branches when resolving confli
     if (isNewSubChatRemote && newSubChatSandboxUrl) {
       // Remote sandbox chat: use HTTP SSE transport
       const selectedModelId = appStore.get(subChatModelIdAtomFamily(newId))
-      const modelString = MODEL_ID_MAP[selectedModelId] || MODEL_ID_MAP["opus"]
-      console.log("[createNewSubChat] Using RemoteChatTransport", { model: modelString })
+
+      // Handle custom models
+      let modelString: string
+      let customModelConfig: { profileId?: string; modelId?: string } | undefined
+
+      if (selectedModelId === "custom") {
+        const profileId = appStore.get(subChatProfileIdAtomFamily(newId))
+        const customModelId = appStore.get(subChatCustomModelIdAtomFamily(newId))
+        if (profileId && customModelId) {
+          modelString = "custom"
+          customModelConfig = { profileId, modelId: customModelId }
+        } else {
+          modelString = MODEL_ID_MAP["opus"]
+        }
+      } else {
+        modelString = MODEL_ID_MAP[selectedModelId] || MODEL_ID_MAP["opus"]
+      }
+
+      console.log("[createNewSubChat] Using RemoteChatTransport", { model: modelString, customModel: customModelConfig })
       newSubChatTransport = new RemoteChatTransport({
         chatId,
         subChatId: newId,
@@ -6936,6 +7009,7 @@ Make sure to preserve all functionality from both branches when resolving confli
         sandboxUrl: newSubChatSandboxUrl,
         mode: subChatMode,
         model: modelString,
+        customModel: customModelConfig,
       })
     } else if (worktreePath) {
       if (chatProvider === "codex") {
@@ -6950,12 +7024,25 @@ Make sure to preserve all functionality from both branches when resolving confli
         })
       } else {
         // Local worktree chat: use IPC transport
+        // Get model info for custom models
+        const selectedModelId = appStore.get(subChatModelIdAtomFamily(newId))
+        let customModelConfig: { profileId?: string; modelId?: string } | undefined
+
+        if (selectedModelId === "custom") {
+          const profileId = appStore.get(subChatProfileIdAtomFamily(newId))
+          const customModelId = appStore.get(subChatCustomModelIdAtomFamily(newId))
+          if (profileId && customModelId) {
+            customModelConfig = { profileId, modelId: customModelId }
+          }
+        }
+
         newSubChatTransport = new IPCChatTransport({
           chatId,
           subChatId: newId,
           cwd: worktreePath,
           projectPath,
           mode: newSubChatMode,
+          customModel: customModelConfig,
         })
       }
     }
