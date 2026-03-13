@@ -505,11 +505,12 @@ export const ArchivePopover = memo(function ArchivePopover({ trigger }: ArchiveP
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
       <PopoverContent
         ref={popoverContentRef}
-        side="right"
+        side="top"
         align="end"
+        alignOffset={-8}
         sideOffset={8}
         forceDark={false}
-        className="w-[250px] h-[400px] p-0 flex flex-col overflow-hidden"
+        className="w-[280px] h-[350px] p-0 flex flex-col overflow-hidden"
         onKeyDown={handleKeyDown}
         tabIndex={-1}
       >
