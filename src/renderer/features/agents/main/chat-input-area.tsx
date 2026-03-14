@@ -483,6 +483,12 @@ export const ChatInputArea = memo(function ChatInputArea({
   const [selectedSubChatCodexThinking, setSelectedSubChatCodexThinking] = useAtom(
     subChatCodexThinkingAtom,
   )
+
+  // Track whether we've synced from storage atoms for this subChatId
+  // This prevents the materialize effect from overwriting custom model selections
+  // before we've had a chance to restore them from storage
+  const [isSynced, setIsSynced] = useState(false)
+
   const setLastSelectedModelId = useSetAtom(lastSelectedModelIdAtom)
   const setLastSelectedCodexModelId = useSetAtom(lastSelectedCodexModelIdAtom)
   const setLastSelectedCodexThinking = useSetAtom(lastSelectedCodexThinkingAtom)
@@ -497,7 +503,10 @@ export const ChatInputArea = memo(function ChatInputArea({
   )
 
   // Sync selectedModel when per-subChat atom value changes (e.g., after localStorage hydration)
+  // Note: "custom" sentinel is not a standard model ID, so we skip syncing for custom models
   useEffect(() => {
+    // Skip for custom model sentinel - selectedModel state is not used for custom models
+    if (selectedSubChatModelId === "custom") return
     const model = availableModels.models.find((m) => m.id === selectedSubChatModelId)
     if (model && model.id !== selectedModel.id) {
       setSelectedModel(model)
@@ -506,11 +515,21 @@ export const ChatInputArea = memo(function ChatInputArea({
 
   // Materialize the resolved Claude model into per-subChat storage once mounted.
   // This prevents later global default changes from affecting existing sub-chats.
+  // IMPORTANT: Skip if custom model is active - selectedSubChatModelId is "custom" sentinel
   useEffect(() => {
+    // Wait for sync to complete before materializing - prevents overwriting custom model selections
+    if (!isSynced) return
     if (provider !== "claude-code") return
     if (!selectedModel?.id) return
+    // Don't overwrite "custom" sentinel if it's already set
+    if (selectedSubChatModelId === "custom") return
+    // Don't overwrite if a modelId is already set but not in availableModels (custom model case)
+    // This happens when switching to a chat that has a custom model selected
+    if (selectedSubChatModelId && !availableModels.models.find(m => m.id === selectedSubChatModelId)) {
+      return
+    }
     setSelectedSubChatModelId(selectedModel.id)
-  }, [provider, selectedModel?.id, setSelectedSubChatModelId])
+  }, [isSynced, provider, selectedModel?.id, setSelectedSubChatModelId, selectedSubChatModelId, availableModels.models])
 
   const storedCodexApiKey = useAtomValue(codexApiKeyAtom)
   const hasAppCodexApiKey = Boolean(normalizeCodexApiKey(storedCodexApiKey))
@@ -608,6 +627,9 @@ export const ChatInputArea = memo(function ChatInputArea({
   // This fixes the issue where appStore.set() updates storage but React doesn't see it
   // because the atom family instance wasn't created yet when we wrote to storage
   useEffect(() => {
+    // Reset sync state when subChatId changes
+    setIsSynced(false)
+
     // Read directly from storage atoms (which were updated by handleCreateNew)
     const storedProfiles = appStore.get(subChatProfileIdsStorageAtom)
     const storedCustoms = appStore.get(subChatCustomModelIdsStorageAtom)
@@ -626,9 +648,13 @@ export const ChatInputArea = memo(function ChatInputArea({
     if (customModelId !== activeCustomModelId) {
       setActiveCustomModelId(customModelId)
     }
+    // Sync modelId - including the "custom" sentinel value
     if (modelId && modelId !== selectedSubChatModelId) {
       setSelectedSubChatModelId(modelId)
     }
+
+    // Mark sync as complete so materialize effect can run
+    setIsSynced(true)
   }, [subChatId]) // Only run when subChatId changes, not on atom changes
 
   // Debug: Log atom values when subChatId changes
