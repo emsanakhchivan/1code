@@ -76,6 +76,7 @@ export type MessageMetadata = {
   cacheCreationInputTokens?: number
   outputTokens?: number
   totalTokens?: number
+  contextTokens?: number // Estimated context window usage (for UI display)
   totalCostUsd?: number
   durationMs?: number
   resultSubtype?: string

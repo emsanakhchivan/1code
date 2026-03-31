@@ -1,4 +1,9 @@
 import type { MCPServer, MCPServerStatus, MessageMetadata, UIMessageChunk } from "./types";
+import {
+  finalContextTokensFromUsage,
+  getTokenCountFromUsage,
+  type Usage,
+} from "./token-estimation";
 
 export function createTransformer(options?: { isUsingOllama?: boolean }) {
   const isUsingOllama = options?.isUsingOllama === true
@@ -38,12 +43,8 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
 
   // Track usage from the last main assistant message (exclude sidechain/subagents).
   // This is used for accurate context window display in final metadata.
-  let lastMainAssistantUsage: {
-    input_tokens: number
-    cache_read_input_tokens: number
-    cache_creation_input_tokens: number
-    output_tokens: number
-  } | null = null
+  // Includes iterations for server-side tool loops (WebSearch, etc.)
+  let lastMainAssistantUsage: Usage | null = null
 
   // Helper to create composite toolCallId: "parentId:childId" or just "childId"
   const makeCompositeId = (originalId: string, parentId: string | null): string => {
@@ -245,6 +246,7 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
     // Track per-turn usage from main assistant messages only.
     // Sidechain/subagent assistant messages have parent_tool_use_id set.
     // Only track usage if it has meaningful values (not all zeros)
+    // Includes iterations for server-side tool loops (WebSearch, etc.)
     if (msg.type === "assistant" && msg.message?.usage && msg.parent_tool_use_id == null) {
       const usage = msg.message.usage
       const hasMeaningfulUsage = (usage.input_tokens > 0 || usage.output_tokens > 0)
@@ -254,6 +256,10 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
           cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
           cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
           output_tokens: usage.output_tokens ?? 0,
+          // Track iterations for server-side tool loops
+          // When the server runs tool loops (e.g., WebSearch), each iteration
+          // has its own usage data. The final context is from the last iteration.
+          iterations: usage.iterations ?? undefined,
         }
       }
     }
@@ -439,11 +445,12 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
       yield* endToolInput()
 
       const resultOutputTokens = msg.usage?.output_tokens
-      const fallbackUsage = {
+      const fallbackUsage: Usage = {
         input_tokens: msg.usage?.input_tokens ?? 0,
         cache_read_input_tokens: msg.usage?.cache_read_input_tokens ?? 0,
         cache_creation_input_tokens: msg.usage?.cache_creation_input_tokens ?? 0,
         output_tokens: resultOutputTokens ?? 0,
+        iterations: msg.usage?.iterations,
       }
 
       // Prefer the last main assistant usage snapshot for context metrics.
@@ -455,6 +462,12 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
         (usage.cache_read_input_tokens ?? 0) +
         (usage.cache_creation_input_tokens ?? 0)
       const resolvedOutputTokens = resultOutputTokens ?? usage.output_tokens
+
+      // Calculate context tokens using SDK's pattern:
+      // - For server-side tool loops (iterations), use final iteration's context
+      // - Otherwise use input + output tokens
+      const contextTokens = finalContextTokensFromUsage(usage)
+
       const metadata: MessageMetadata = {
         sessionId: msg.session_id,
         inputTokens: resolvedInputTokens,
@@ -465,6 +478,7 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
           resolvedInputTokens != null && resolvedOutputTokens != null
             ? resolvedInputTokens + resolvedOutputTokens
             : undefined,
+        contextTokens,
         totalCostUsd: msg.total_cost_usd,
         durationMs: startTime ? Date.now() - startTime : undefined,
         resultSubtype: msg.subtype || "success",
@@ -475,6 +489,7 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
         inputTokens: metadata.inputTokens,
         outputTokens: metadata.outputTokens,
         totalTokens: metadata.totalTokens,
+        contextTokens: metadata.contextTokens,
         usage,
         fallbackUsage,
         lastMainAssistantUsage,

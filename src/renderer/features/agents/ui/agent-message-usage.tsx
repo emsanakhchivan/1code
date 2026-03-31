@@ -19,6 +19,7 @@ export interface AgentMessageMetadata {
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number
+  contextTokens?: number // Estimated context window usage
   finalTextId?: string
   durationMs?: number
   resultSubtype?: string
@@ -65,6 +66,7 @@ export const AgentMessageUsage = memo(function AgentMessageUsage({
     inputTokens = 0,
     outputTokens = 0,
     totalTokens = 0,
+    contextTokens,
     durationMs,
     resultSubtype,
   } = metadata
@@ -142,6 +144,16 @@ export const AgentMessageUsage = memo(function AgentMessageUsage({
                   <span className="text-muted-foreground">Tokens:</span>
                   <span className="font-mono font-medium text-foreground">
                     {displayTokens.toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              {/* Context window usage */}
+              {contextTokens !== undefined && contextTokens > 0 && (
+                <div className="flex justify-between text-xs gap-4">
+                  <span className="text-muted-foreground">Context:</span>
+                  <span className="font-mono text-foreground">
+                    {contextTokens.toLocaleString()}
                   </span>
                 </div>
               )}
