@@ -8,6 +8,8 @@ export type CustomClaudeConfig = {
   model: string
   token: string
   baseUrl: string
+  profileId?: string
+  profileName?: string
 }
 
 export type OfflineCheckResult = {

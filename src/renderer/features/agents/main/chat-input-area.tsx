@@ -528,8 +528,20 @@ export const ChatInputArea = memo(function ChatInputArea({
     if (selectedSubChatModelId && !availableModels.models.find(m => m.id === selectedSubChatModelId)) {
       return
     }
+
+    // SAFEGUARD: Don't overwrite storage if it has a different valid value
+    // This prevents race condition where materialize runs before sync effect updates selectedModel
+    const storedModels = appStore.get(subChatModelIdsStorageAtom)
+    const storedModelId = storedModels[subChatId]
+    if (storedModelId && storedModelId !== selectedModel.id && storedModelId !== "custom") {
+      // Storage has a different value - sync effect hasn't updated selectedModel yet
+      // Skip materialization, the next render will have the correct selectedModel
+      console.log("[ChatInputArea] Materialize skipped - storage has different value:", { storedModelId, selectedModelId: selectedModel.id })
+      return
+    }
+
     setSelectedSubChatModelId(selectedModel.id)
-  }, [isSynced, provider, selectedModel?.id, setSelectedSubChatModelId, selectedSubChatModelId, availableModels.models])
+  }, [isSynced, provider, selectedModel?.id, setSelectedSubChatModelId, selectedSubChatModelId, availableModels.models, subChatId])
 
   const storedCodexApiKey = useAtomValue(codexApiKeyAtom)
   const hasAppCodexApiKey = Boolean(normalizeCodexApiKey(storedCodexApiKey))

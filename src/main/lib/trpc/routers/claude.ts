@@ -808,6 +808,8 @@ export const claudeRouter = router({
             model: z.string().min(1),
             token: z.string().min(1),
             baseUrl: z.string().min(1),
+            profileId: z.string().optional(),
+            profileName: z.string().optional(),
           })
           .optional(),
         maxThinkingTokens: z.number().optional(), // Enable extended thinking
@@ -1090,6 +1092,7 @@ export const claudeRouter = router({
               modelProvider: finalCustomConfig
                 ? (isUsingOllama ? "ollama" : "custom")
                 : "anthropic",
+              modelProfileName: finalCustomConfig?.profileName || null,
             }
 
             // Capture stderr from Claude process for debugging
@@ -2774,6 +2777,7 @@ ${prompt}
                 hasOutputTokens: !!metadata?.outputTokens,
                 modelId: metadata?.modelId,
                 modelProvider: metadata?.modelProvider,
+                modelProfileName: metadata?.modelProfileName,
               })
 
               const finalMessages = [...messagesToSave, assistantMessage]
@@ -2821,8 +2825,8 @@ ${prompt}
                     projectId: chatRecord?.projectId ?? null,
                     modelId: metadata.modelId || "unknown",
                     modelProvider: metadata.modelProvider || null,
-                    modelProfileId: null, // Will be populated from frontend in future
-                    modelProfileName: null,
+                    modelProfileId: input.customConfig?.profileId ?? null,
+                    modelProfileName: input.customConfig?.profileName ?? null,
                     inputTokens: metadata.inputTokens || 0,
                     outputTokens: metadata.outputTokens || 0,
                     cacheReadTokens: metadata.cacheReadInputTokens || 0,

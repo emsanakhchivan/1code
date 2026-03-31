@@ -185,7 +185,7 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
     const networkOnline = appStore.get(networkOnlineAtom)
     const autoOffline = appStore.get(autoOfflineModeAtom)
 
-    let customConfig: { model: string; token: string; baseUrl: string } | undefined = undefined
+    let customConfig: { model: string; token: string; baseUrl: string; profileId?: string; profileName?: string } | undefined = undefined
 
     // Priority 1: If auto-offline enabled and no internet, use offline profile
     if (!networkOnline && autoOffline) {
@@ -199,6 +199,8 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
             model: model.modelId,
             token: offlineProfile.token,
             baseUrl: offlineProfile.baseUrl,
+            profileId: offlineProfile.id,
+            profileName: offlineProfile.name,
           }
         }
       }
@@ -216,6 +218,8 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
             model: model.modelId,
             token: profile.token,
             baseUrl: profile.baseUrl,
+            profileId: profile.id,
+            profileName: profile.name,
           }
         }
       }

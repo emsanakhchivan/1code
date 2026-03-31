@@ -140,20 +140,16 @@ function ModelRow({
   messageCount: number
   totalCostCents?: number | null
 }) {
-  // Generate display name
-  const displayName = modelProfileName || modelId
-
   return (
     <tr className="border-b border-border/50 hover:bg-muted/30 transition-colors">
       <td className="py-3 px-4">
         <div className="flex flex-col">
-          <span className="font-medium text-sm">{displayName}</span>
-          {modelProfileName && (
-            <span className="text-xs text-muted-foreground">{modelId}</span>
-          )}
+          <span className="font-medium text-sm">{modelId}</span>
           {modelProvider && (
             <span className="text-xs text-muted-foreground capitalize">
-              {modelProvider}
+              {modelProvider === "custom" && modelProfileName
+                ? `Custom (${modelProfileName})`
+                : modelProvider}
             </span>
           )}
         </div>

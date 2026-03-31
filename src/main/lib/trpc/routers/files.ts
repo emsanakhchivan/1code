@@ -84,7 +84,9 @@ function validatePathSafe(targetPath: string, allowedParent?: string): void {
   const resolved = resolve(targetPath)
   if (allowedParent) {
     const resolvedParent = resolve(allowedParent)
-    if (!resolved.startsWith(resolvedParent + "/") && resolved !== resolvedParent) {
+    // Use platform-specific separator and also check for both separators for cross-platform compatibility
+    const separator = process.platform === "win32" ? "\\" : "/"
+    if (!resolved.startsWith(resolvedParent + separator) && resolved !== resolvedParent) {
       throw new Error("Path escapes allowed directory")
     }
   }
@@ -507,5 +509,81 @@ export const filesRouter = router({
       validatePathSafe(input.absolutePath)
       await shell.trashItem(input.absolutePath)
       return { success: true }
+    }),
+
+  /**
+   * Save a plan to the project's .claude/plans directory
+   * Auto-adds .claude/plans/ to .gitignore if not present
+   */
+  savePlanToWorkspace: publicProcedure
+    .input(z.object({
+      projectPath: z.string(),
+      planContent: z.string(),
+      planName: z.string(),
+    }))
+    .mutation(async ({ input }) => {
+      const { projectPath, planContent, planName } = input
+
+      // Validate project path
+      validatePathSafe(projectPath)
+
+      // Sanitize plan name for filesystem (kebab-case, safe chars only)
+      const safePlanName = planName
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, "-")
+        .replace(/-+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 100) || "plan"
+
+      // Create .claude/plans directory
+      const plansDir = join(projectPath, ".claude", "plans")
+      await mkdir(plansDir, { recursive: true })
+
+      // Write plan file
+      const filename = `${safePlanName}.md`
+      const filePath = join(plansDir, filename)
+
+      // Ensure the resolved path stays within the plans directory
+      validatePathSafe(filePath, plansDir)
+
+      await writeFile(filePath, planContent, "utf-8")
+
+      console.log(`[files] Saved plan to ${filePath}`)
+
+      // Auto-add to .gitignore
+      const gitignorePath = join(projectPath, ".gitignore")
+      const plansIgnorePattern = ".claude/plans/"
+
+      try {
+        let gitignoreContent = ""
+        try {
+          gitignoreContent = await readFile(gitignorePath, "utf-8")
+        } catch {
+          // .gitignore doesn't exist, will create it
+        }
+
+        // Check if pattern already exists
+        const hasPattern = gitignoreContent
+          .split("\n")
+          .some((line) => line.trim() === plansIgnorePattern || line.trim() === ".claude/")
+
+        if (!hasPattern) {
+          // Append the pattern
+          const newContent = gitignoreContent
+            ? `${gitignoreContent.trim()}\n\n# Claude Code plans\n${plansIgnorePattern}\n`
+            : `# Claude Code plans\n${plansIgnorePattern}\n`
+          await writeFile(gitignorePath, newContent, "utf-8")
+          console.log(`[files] Added ${plansIgnorePattern} to .gitignore`)
+        }
+      } catch (error) {
+        // Non-fatal: log but don't fail the save
+        console.warn(`[files] Could not update .gitignore:`, error)
+      }
+
+      return {
+        filePath,
+        filename,
+        relativePath: `.claude/plans/${filename}`,
+      }
     }),
 })

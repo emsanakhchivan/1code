@@ -92,8 +92,10 @@ export const AgentModelTag = memo(function AgentModelTag({
   // Need at least modelId to show something
   if (!modelId && !modelProfileName) return null
 
-  const displayName = modelProfileName || getShortModelName(modelId)
+  const modelDisplayName = getShortModelName(modelId)
   const providerName = getProviderDisplayName(modelProvider)
+
+  // Button shows only model name, profile name is shown in hover modal
 
   return (
     <HoverCard openDelay={400} closeDelay={100}>
@@ -106,7 +108,7 @@ export const AgentModelTag = memo(function AgentModelTag({
             "transition-[background-color,transform] duration-150 ease-out",
           )}
         >
-          <span className="font-mono truncate max-w-[100px]">{displayName}</span>
+          <span className="font-mono truncate max-w-[140px]">{modelDisplayName}</span>
         </button>
       </HoverCardTrigger>
       <HoverCardContent
@@ -118,13 +120,19 @@ export const AgentModelTag = memo(function AgentModelTag({
           <div className="flex justify-between text-xs gap-4">
             <span className="text-muted-foreground">Model:</span>
             <span className="font-mono text-foreground truncate max-w-[200px]" title={modelId}>
-              {modelId || modelProfileName || "unknown"}
+              {modelId || "unknown"}
             </span>
           </div>
           {modelProvider && (
             <div className="flex justify-between text-xs gap-4">
               <span className="text-muted-foreground">Provider:</span>
               <span className="font-mono text-foreground">{providerName}</span>
+            </div>
+          )}
+          {modelProvider === "custom" && modelProfileName && (
+            <div className="flex justify-between text-xs gap-4">
+              <span className="text-muted-foreground">Profile:</span>
+              <span className="font-mono text-foreground">{modelProfileName}</span>
             </div>
           )}
         </div>

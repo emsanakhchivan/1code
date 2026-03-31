@@ -209,6 +209,8 @@ export type CustomClaudeConfig = {
   model: string
   token: string
   baseUrl: string
+  profileId?: string
+  profileName?: string
 }
 
 // Custom model configuration for a single model within a profile

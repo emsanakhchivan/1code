@@ -2,17 +2,20 @@
 
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 import { ChatMarkdownRenderer } from "../../../components/chat-markdown-renderer"
 import { Button } from "../../../components/ui/button"
-import { CheckIcon, CollapseIcon, CopyIcon, ExpandIcon, PlanIcon } from "../../../components/ui/icons"
+import { CheckIcon, CollapseIcon, CopyIcon, DownloadIcon, ExpandIcon, PlanIcon } from "../../../components/ui/icons"
 import { Kbd } from "../../../components/ui/kbd"
 import { TextShimmer } from "../../../components/ui/text-shimmer"
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip"
+import { trpc } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
 import {
   currentPlanPathAtomFamily,
   pendingBuildPlanSubChatIdAtom,
   planSidebarOpenAtomFamily,
+  selectedProjectAtom,
   subChatModeAtomFamily,
 } from "../atoms"
 import { useAgentSubChatStore } from "../stores/sub-chat-store"
@@ -47,12 +50,27 @@ export const AgentPlanFileTool = memo(function AgentPlanFileTool({
 }: AgentPlanFileToolProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [saved, setSaved] = useState(false)
   const { isPending } = getToolStatus(part, chatStatus)
   const isWrite = part.type === "tool-Write"
   // Get mode from per-subChat atomFamily
   const subChatModeAtom = useMemo(() => subChatModeAtomFamily(subChatId), [subChatId])
   const subChatMode = useAtomValue(subChatModeAtom)
   const setPendingBuildPlanSubChatId = useSetAtom(pendingBuildPlanSubChatIdAtom)
+  const selectedProject = useAtomValue(selectedProjectAtom)
+  const projectPath = selectedProject?.path
+
+  // tRPC mutation for saving plan
+  const savePlanMutation = trpc.files.savePlanToWorkspace.useMutation({
+    onSuccess: (data) => {
+      setSaved(true)
+      toast.success(`Plan saved to ${data.relativePath}`)
+      setTimeout(() => setSaved(false), 2000)
+    },
+    onError: (error) => {
+      toast.error(`Failed to save plan: ${error.message}`)
+    },
+  })
 
   // Refs for scroll gradients (avoid re-renders)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -161,6 +179,37 @@ export const AgentPlanFileTool = memo(function AgentPlanFileTool({
     setTimeout(() => setCopied(false), 2000)
   }, [planContent])
 
+  // Extract plan name from markdown content (first H1 or title)
+  const extractPlanName = useCallback((content: string): string => {
+    // Try to find # Title pattern
+    const h1Match = content.match(/^#\s+(.+?)(?:\n|$)/m)
+    if (h1Match) {
+      return h1Match[1].trim()
+    }
+    // Try to find Plan: Title pattern
+    const planMatch = content.match(/(?:Plan|PLAN):\s*(.+?)(?:\n|$)/i)
+    if (planMatch) {
+      return planMatch[1].trim()
+    }
+    // Fallback to timestamp
+    return `plan-${Date.now()}`
+  }, [])
+
+  // Handle save plan to workspace
+  const handleSaveToWorkspace = useCallback(() => {
+    if (!projectPath || !planContent) {
+      toast.error("No project selected")
+      return
+    }
+
+    const planName = extractPlanName(planContent)
+    savePlanMutation.mutate({
+      projectPath,
+      planContent,
+      planName,
+    })
+  }, [projectPath, planContent, extractPlanName, savePlanMutation])
+
   // If no content yet, show minimal view with shimmer (no icon during shimmer)
   if (!hasVisibleContent) {
     return (
@@ -229,6 +278,40 @@ export const AgentPlanFileTool = memo(function AgentPlanFileTool({
               </TooltipTrigger>
               <TooltipContent side="top" showArrow={false}>
                 Copy plan
+              </TooltipContent>
+            </Tooltip>
+          )}
+
+          {/* Save to Workspace button */}
+          {hasVisibleContent && projectPath && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleSaveToWorkspace()
+                  }}
+                  disabled={savePlanMutation.isPending}
+                  className="group p-1 rounded-md hover:bg-accent transition-[background-color,transform] duration-150 ease-out active:scale-95 disabled:opacity-50"
+                >
+                  <div className="relative w-3.5 h-3.5">
+                    <DownloadIcon
+                      className={cn(
+                        "absolute inset-0 w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-[opacity,transform,color] duration-200 ease-out",
+                        saved || savePlanMutation.isPending ? "opacity-0 scale-50" : "opacity-100 scale-100",
+                      )}
+                    />
+                    <CheckIcon
+                      className={cn(
+                        "absolute inset-0 w-3.5 h-3.5 text-green-500 transition-[opacity,transform,color] duration-200 ease-out",
+                        saved ? "opacity-100 scale-100" : "opacity-0 scale-50",
+                      )}
+                    />
+                  </div>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" showArrow={false}>
+                {savePlanMutation.isPending ? "Saving..." : "Save to workspace"}
               </TooltipContent>
             </Tooltip>
           )}
