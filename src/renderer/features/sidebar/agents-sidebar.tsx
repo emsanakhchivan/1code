@@ -28,6 +28,7 @@ import {
   showWorkspaceIconAtom,
   betaKanbanEnabledAtom,
   betaAutomationsEnabledAtom,
+  localModeAtom,
 } from "../../lib/atoms"
 import {
   useRemoteChats,
@@ -1151,6 +1152,7 @@ function SidebarAutomationsIcon(props: React.SVGProps<SVGSVGElement>) {
 // Isolated Inbox Button - full-width navigation link matching web layout
 const InboxButton = memo(function InboxButton() {
   const automationsEnabled = useAtomValue(betaAutomationsEnabledAtom)
+  const localMode = useAtomValue(localModeAtom)
   const desktopView = useAtomValue(desktopViewAtom)
   const setSelectedChatId = useSetAtom(selectedAgentChatIdAtom)
   const setSelectedDraftId = useSetAtom(selectedDraftIdAtom)
@@ -1161,7 +1163,7 @@ const InboxButton = memo(function InboxButton() {
   const { data: unreadData } = useQuery({
     queryKey: ["automations", "inboxUnreadCount", teamId],
     queryFn: () => remoteTrpc.automations.getInboxUnreadCount.query({ teamId: teamId! }),
-    enabled: !!teamId && automationsEnabled,
+    enabled: !!teamId && automationsEnabled && !localMode,
     refetchInterval: 30_000,
   })
   const inboxUnreadCount = unreadData?.count ?? 0
@@ -1173,7 +1175,8 @@ const InboxButton = memo(function InboxButton() {
     setDesktopView("inbox")
   }, [setSelectedChatId, setSelectedDraftId, setShowNewChatForm, setDesktopView])
 
-  if (!automationsEnabled) return null
+  // Hide in local mode or when automations disabled
+  if (!automationsEnabled || localMode) return null
 
   const isActive = desktopView === "inbox"
 
@@ -1202,12 +1205,14 @@ const InboxButton = memo(function InboxButton() {
 // Isolated Automations Button - full-width navigation link matching web layout
 const AutomationsButton = memo(function AutomationsButton() {
   const automationsEnabled = useAtomValue(betaAutomationsEnabledAtom)
+  const localMode = useAtomValue(localModeAtom)
 
   const handleClick = useCallback(() => {
     window.desktopApi.openExternal("https://21st.dev/agents/app/automations")
   }, [])
 
-  if (!automationsEnabled) return null
+  // Hide in local mode or when automations disabled
+  if (!automationsEnabled || localMode) return null
 
   return (
     <button
