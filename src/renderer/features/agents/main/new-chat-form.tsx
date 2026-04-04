@@ -27,6 +27,7 @@ import {
   PopoverTrigger,
 } from "../../../components/ui/popover"
 import { cn } from "../../../lib/utils"
+import { appStore } from "../../../lib/jotai-store"
 import {
   agentsDebugModeAtom,
   justCreatedIdsAtom,
@@ -111,7 +112,7 @@ import {
   PromptInputActions,
   PromptInputContextItems,
 } from "../../../components/ui/prompt-input"
-import { agentsSidebarOpenAtom, agentsUnseenChangesAtom } from "../atoms"
+import { agentsSidebarOpenAtom, agentsUnseenChangesAtom, subChatModelIdAtomFamily, subChatProfileIdAtomFamily, subChatCustomModelIdAtomFamily } from "../atoms"
 import { AgentSendButton } from "../components/agent-send-button"
 import { AgentModelSelector } from "../components/agent-model-selector"
 import { CreateBranchDialog } from "../components/create-branch-dialog"
@@ -383,6 +384,10 @@ export function NewChatForm({
     () => availableModels.models.find((m) => m.id === lastSelectedModelId) || availableModels.models[0],
   )
 
+  // Track if we've already applied the default model for new chats
+  // This prevents the useEffect from re-applying defaults when user manually selects a model
+  const hasAppliedDefaultModelRef = useRef(false)
+
   // Apply default model for new chats on mount
   // Use the atom values directly (they handle localStorage parsing correctly)
   useEffect(() => {
@@ -391,6 +396,13 @@ export function NewChatForm({
     // Wait for models to be available
     if (availableModels.models.length === 0) {
       console.log("[NewChatForm] Models not ready yet, skipping")
+      return
+    }
+
+    // Skip if we've already applied the default model
+    // This prevents overwriting user's manual selection
+    if (hasAppliedDefaultModelRef.current) {
+      console.log("[NewChatForm] Already applied default model, skipping")
       return
     }
 
@@ -403,6 +415,26 @@ export function NewChatForm({
       modelIdentifier = lastUsedModel
     } else if (defaultModelForNewChats && defaultModelForNewChats !== "last-used") {
       modelIdentifier = defaultModelForNewChats
+    }
+
+    // If no model identifier but custom profile is active globally, use first model from profile
+    // This handles the case: first chat in new workspace, user has custom API configured
+    if (!modelIdentifier && activeProfileId) {
+      const profile = customProfiles.find(p => p.id === activeProfileId)
+      if (profile?.models.length) {
+        // Use the currently selected model if set, otherwise first model
+        const modelToUse = activeCustomModelId
+          ? profile.models.find(m => m.id === activeCustomModelId)
+          : profile.models[0]
+        if (modelToUse) {
+          console.log("[NewChatForm] No lastUsedModel but active profile found, using:", modelToUse.name)
+          modelIdentifier = createModelIdentifier("custom", activeProfileId, modelToUse.id)
+          // Ensure activeCustomModelId is set if it wasn't
+          if (!activeCustomModelId) {
+            setActiveCustomModelId(modelToUse.id)
+          }
+        }
+      }
     }
 
     console.log("[NewChatForm] modelIdentifier:", modelIdentifier)
@@ -428,6 +460,7 @@ export function NewChatForm({
           setSelectedAgent(claudeAgent)
           setLastSelectedAgentId("claude-code")
         }
+        hasAppliedDefaultModelRef.current = true
       }
     } else if (parsed.provider === "codex") {
       const model = codexUiModels.find((m) => m.id === parsed.modelId)
@@ -437,6 +470,7 @@ export function NewChatForm({
         const codexAgent = enabledAgents.find((a) => a.id === "codex") || fallbackAgent
         setSelectedAgent(codexAgent)
         setLastSelectedAgentId("codex")
+        hasAppliedDefaultModelRef.current = true
       }
     } else if (parsed.provider === "custom" && parsed.customProfileId && parsed.customModelId) {
       console.log("[NewChatForm] Setting custom model:", parsed.customProfileId, parsed.customModelId)
@@ -446,6 +480,7 @@ export function NewChatForm({
         setSelectedAgent(claudeAgent)
         setLastSelectedAgentId("claude-code")
       }
+      hasAppliedDefaultModelRef.current = true
     } else if (parsed.provider === "ollama" && parsed.modelId) {
       console.log("[NewChatForm] Setting Ollama model:", parsed.modelId)
       setSelectedOllamaModel(parsed.modelId)
@@ -453,8 +488,9 @@ export function NewChatForm({
         setSelectedAgent(claudeAgent)
         setLastSelectedAgentId("claude-code")
       }
+      hasAppliedDefaultModelRef.current = true
     }
-  }, [availableModels.models.length, codexUiModels.length, defaultModelForNewChats, lastUsedModel]) // Run when models are ready or model preferences change
+  }, [availableModels.models.length, codexUiModels.length, defaultModelForNewChats, lastUsedModel, activeProfileId, activeCustomModelId, customProfiles, setActiveCustomModelId]) // Run when models are ready or model preferences change
 
   // Sync selectedModel when atom value changes (e.g., after localStorage hydration)
   useEffect(() => {
@@ -508,12 +544,18 @@ export function NewChatForm({
     if (selectedAgent.id === "codex") {
       return `${selectedCodexModel.id}/${selectedCodexThinking}`
     }
+    // If custom model is selected, return custom model identifier
+    if (activeProfileId && activeCustomModelId) {
+      return createModelIdentifier("custom", activeProfileId, activeCustomModelId)
+    }
     return selectedModel?.id ?? "opus"
   }, [
     selectedAgent.id,
     selectedCodexModel.id,
     selectedCodexThinking,
     selectedModel?.id,
+    activeProfileId,
+    activeCustomModelId,
   ])
 
   // Determine current Ollama model (selected or recommended)
@@ -536,6 +578,16 @@ export function NewChatForm({
       return activeCustomModel.name
     }
 
+    // If profile is active but no specific model selected, show first model from profile
+    // This handles initialization state where profile is set but model not yet synced
+    if (activeProfileId && !activeCustomModel) {
+      const profile = customProfiles.find(p => p.id === activeProfileId)
+      if (profile?.models.length) {
+        console.log("[NewChatForm] returning first model from profile:", profile.models[0].name)
+        return profile.models[0].name
+      }
+    }
+
     if (!selectedModel) {
       return "Select model"
     }
@@ -549,6 +601,7 @@ export function NewChatForm({
     currentOllamaModel,
     activeProfileId,
     activeCustomModel,
+    customProfiles,
     selectedModel,
   ])
   const [repoPopoverOpen, setRepoPopoverOpen] = useState(false)
@@ -1158,6 +1211,28 @@ export function NewChatForm({
       const ids = [data.id]
       if (data.subChats?.[0]?.id) {
         ids.push(data.subChats[0].id)
+
+        // Set model atoms for the new sub-chat so the selected model persists
+        const newSubChatId = data.subChats[0].id
+
+        // Parse the model identifier to determine model type
+        const parsed = parseModelIdentifier(selectedChatModel)
+
+        if (parsed.provider === "custom" && parsed.customProfileId && parsed.customModelId) {
+          // Custom model selected - set custom model atoms
+          console.log("[NewChatForm] Setting custom model atoms for subChat:", newSubChatId.slice(-8), parsed.customProfileId, parsed.customModelId)
+          appStore.set(subChatModelIdAtomFamily(newSubChatId), "custom")
+          appStore.set(subChatProfileIdAtomFamily(newSubChatId), parsed.customProfileId)
+          appStore.set(subChatCustomModelIdAtomFamily(newSubChatId), parsed.customModelId)
+        } else if (parsed.provider === "claude") {
+          // Standard Claude model selected
+          console.log("[NewChatForm] Setting Claude model for subChat:", newSubChatId.slice(-8), parsed.modelId)
+          appStore.set(subChatModelIdAtomFamily(newSubChatId), parsed.modelId)
+        } else if (parsed.provider === "codex") {
+          // Codex model selected
+          console.log("[NewChatForm] Setting Codex model for subChat:", newSubChatId.slice(-8), parsed.modelId)
+          // Codex models are handled separately via subChatCodexModelIdAtomFamily
+        }
       }
       setJustCreatedIds((prev) => new Set([...prev, ...ids]))
     },
