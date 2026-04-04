@@ -1,166 +1,215 @@
-# 1Code
+# 1Code Fork
 
-[1Code.dev](https://1code.dev)
+> **This is a community-enhanced fork of [21st.dev/1Code](https://github.com/21st-dev/1code)**
 
-Open-source coding agent client. Run Claude Code, Codex, and more - locally or in the cloud.
+A powerful, locally-focused coding agent client with enhanced features for privacy-conscious developers and advanced model management.
 
-By [21st.dev](https://21st.dev) team
-
-## Highlights
-
-- **Multi-Agent Support** - Claude Code and Codex in one app, switch instantly
-- **Visual UI** - Cursor-like desktop app with diff previews and real-time tool execution
-- **Custom Models & Providers (BYOK)** - Bring your own API keys
-- **Git Worktree Isolation** - Each chat runs in its own isolated worktree
-- **Background Agents** - Cloud sandboxes that run when your laptop sleeps
-- **Live Browser Previews** - Preview dev branches in a real browser
-- **Kanban Board** - Visualize agent sessions
-- **Built-in Git Client** - Visual staging, diffs, PR creation, push to GitHub
-- **File Viewer** - File preview with Cmd+P search and image viewer
-- **Integrated Terminal** - Sidebar or bottom panel with Cmd+J toggle
-- **Model Selector** - Switch between models and providers
-- **MCP & Plugins** - Server management, plugin marketplace, rich tool display
-- **Automations** - Trigger agents from GitHub, Linear, Slack, or manually from git events
-- **Chat Forking** - Fork a sub-chat from any assistant message
-- **Message Queue** - Queue prompts while an agent is working
-- **API** - Run agents programmatically with a single API call
-- **Voice Input** - Hold-to-talk dictation
-- **Plan Mode** - Structured plans with markdown preview
-- **Extended Thinking** - Enabled by default with visual UX
-- **Skills & Slash Commands** - Custom skills and slash commands
-- **Custom Sub-agents** - Visual task display in sidebar
-- **Memory** - CLAUDE.md and AGENTS.md support
-- **PWA** - Start and monitor background agents from your phone
-- **Cross Platform** - macOS desktop, web app, Windows and Linux
-
-## Features
-
-### Run coding agents the right way
-
-Run agents locally, in worktrees, in background - without touching main branch.
-
-![Worktree Demo](assets/worktree.gif)
-
-- **Git Worktree Isolation** - Each chat session runs in its own isolated worktree
-- **Background Execution** - Run agents in background while you continue working
-- **Local-first** - All code stays on your machine, no cloud sync required
-- **Branch Safety** - Never accidentally commit to main branch
-- **Shared Terminals** - Share terminal sessions across local-mode workspaces
+**Fork Version:** `v0.0.90` (upstream: `v0.0.72`)
 
 ---
 
-### UI that finally respects your code
+## Fork Highlights
 
-Cursor-like UI with diff previews, built-in git client, and the ability to see changes before they land.
+This fork extends the original 1Code with **48+ unique commits** adding significant new capabilities:
 
-![Cursor UI Demo](assets/cursor-ui.gif)
+### Local Mode - Complete Offline Operation
 
-- **Diff Previews** - See exactly what changes the agent is making in real-time
-- **Built-in Git Client** - Stage, commit, push to GitHub, and manage branches without leaving the app
-- **Git Activity Badges** - See git operations directly on agent messages
-- **Rollback** - Roll back changes from any user message bubble
-- **Real-time Tool Execution** - See bash commands, file edits, and web searches as they happen
-- **File Viewer** - File preview with Cmd+P search, syntax highlighting, and image viewer
-- **Chat Forking** - Fork a sub-chat from any assistant message to explore alternatives
-- **Chat Export** - Export conversations for sharing or archival
-- **File Mentions** - Reference files directly in chat with @ mentions
-- **Message Queue** - Queue up prompts while an agent is working
+Run 1Code without any 21st.dev backend connections. Perfect for:
+- Privacy-conscious developers who want zero external API calls
+- Users who only want to use their own API keys
+- Teams with strict network policies
 
----
-
-### Plan mode that actually helps you think
-
-The agent asks clarifying questions, builds structured plans, and shows clean markdown preview - all before execution.
-
-![Plan Mode Demo](assets/plan-mode.gif)
-
-- **Clarifying Questions** - The agent asks what it needs to know before starting
-- **Structured Plans** - See step-by-step breakdown of what will happen
-- **Clean Markdown Preview** - Review plans in readable format
-- **Review Before Execution** - Approve or modify the plan before the agent acts
-- **Extended Thinking** - Enabled by default with visual thinking gradient
-- **Sub-agents** - Visual task list for sub-agents in the details sidebar
+**How it works:**
+- Toggle "Local Mode" in Settings → Preferences
+- All cloud features (Automations, Inbox, Remote Sync) are disabled
+- Works with Claude, Codex, Custom Models, and Ollama using your own keys
+- "Use Locally" quick-start option in onboarding flow
 
 ---
 
-### Background agents that never sleep
+### Token Usage Monitor Dashboard
 
-Close your laptop. Your agents keep running in isolated cloud sandboxes with live browser previews.
+Track your AI spending with detailed analytics:
 
-- **Runs When You Sleep** - Background agents continue working even when your laptop is closed
-- **Cloud Sandboxes** - Every background session runs in an isolated cloud environment
-- **Live Browser Previews** - See your dev branch running in a real browser
+- **Real-time token tracking** per model and per chat
+- **Cost estimation** with configurable rates
+- **Time-range filtering** (Today, 7 Days, 30 Days, All Time)
+- **Per-model breakdown** showing input/output/cache tokens
+- **Activity heatmap** for usage patterns
+- **Secondary metrics:** message count, cache read/write, duration
 
----
-
-### Connect anything with MCP
-
-Full MCP server lifecycle management with a built-in plugin marketplace. No config files needed.
-
-- **MCP Server Management** - Toggle, configure, and delete MCP servers from the UI
-- **Plugin Marketplace** - Browse and install plugins with one click
-- **Rich Tool Display** - See MCP tool calls with formatted inputs and outputs
-- **@ Mentions** - Reference MCP servers directly in chat input
+![Monitor Tab](assets/monitor-dashboard.png)
 
 ---
 
-### Automations that work while you sleep
+### Per-SubChat Model Selection
 
-Trigger agents from GitHub, Linear, Slack, or manually from git events. Auto-review PRs, fix CI failures, and complete tasks - all configurable.
+Assign different AI models to different sub-chats within the same project:
 
-- **@1code Triggers** - Tag @1code in GitHub, Linear, or Slack to start agents
-- **Git Event Triggers** - Run automations on push, PR, or any git event
-- **Conditions & Filters** - Control when automations fire
-- **Execution Timeline** - Visual history of past runs
-- **Silent Mode** - Toggle respond-to-trigger for background automations
+- **Model inheritance control** - choose whether new sub-chats inherit parent's model
+- **Default model for new chats** - set a preferred model globally
+- **Model persistence** - selections survive chat switching
+- **Custom model profiles** - configure multiple providers (OpenRouter, Together AI, etc.)
 
-Automations require a [Pro or Max subscription](https://1code.dev/pro). Learn more at [1code.dev/agents/async](https://1code.dev/agents/async).
+---
 
+### Enhanced Custom Model Profiles
 
-## API
+Configure unlimited custom AI providers:
 
-Run coding agents programmatically. Point at a repo, give it a task - the agent runs in a sandbox and delivers a PR.
-
-```bash
-curl -X POST https://1code.dev/api/v1/tasks \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{
-    "repository": "https://github.com/your-org/your-repo",
-    "prompt": "Fix the failing CI tests"
-  }'
+```typescript
+// Example: OpenRouter profile with multiple models
+{
+  name: "OpenRouter",
+  baseUrl: "https://openrouter.ai/api/v1",
+  token: "your-api-key",
+  models: [
+    { name: "Claude 3 Opus", modelId: "anthropic/claude-3-opus" },
+    { name: "GPT-4 Turbo", modelId: "openai/gpt-4-turbo" },
+    { name: "Gemini Pro", modelId: "google/gemini-pro" }
+  ]
+}
 ```
 
-- **Remote Sandboxes** - Isolated cloud environment, repo cloned, dependencies installed
-- **Git & PR Integration** - Agent commits, pushes branches, opens PRs automatically
-- **Async Execution** - Fire and forget, poll for status or get notified
-- **Follow-up Messages** - Send additional instructions to a running task
+**Features:**
+- Multiple models per profile
+- Offline/Ollama profile pre-configured
+- Visibility toggle per model
+- Profile validation and deletion
 
-Learn more at [1code.dev/agents/api](https://1code.dev/agents/api)
+---
+
+### Archived Chats with Restore
+
+Soft-delete chats without permanent loss:
+
+- **Archive popover** with file stats (additions/deletions)
+- **Search and filter** archived conversations
+- **Batch archive** multiple chats
+- **Restore functionality** - unarchive when needed
+- **Archive count indicator** in sidebar
+
+---
+
+### Chat Details & Statistics
+
+Get insights into your conversations:
+
+- **ChatDetailsPopover** - comprehensive statistics per chat
+- **Model tags** displayed on messages
+- **Agent model tag** component showing which model generated each response
+- **Token usage** per message
+- **Iterations tracking** and context window estimation
+
+---
+
+### Windows Enhancements
+
+Better Windows support for cross-platform users:
+
+- **Shell type selection** - Choose Bash, PowerShell, or CMD
+- **Windows build workflow** - Automated CI/CD for Windows releases
+- **Windows path handling** - Fixed absolute path issues in file viewer
+- **VS-style file tree** - Proper folder icons and path normalization
+
+---
+
+### Persistent Error Handling
+
+Better UX when things go wrong:
+
+- **Persistent error banner** - Dismissible but remembers state
+- **Error state management** - Tracks errors across all chat transports
+- **Stream inactivity timeout** - Handles proxy disconnects gracefully
+
+---
+
+### Upgraded Codex Integration
+
+- **GPT-5.4 Codex** as default model (upgraded from previous version)
+- Better model tracking in message metadata
+- Enhanced model switching UX
+
+---
+
+## All Original Features from 1Code
+
+This fork maintains all features from the upstream 1Code:
+
+### Multi-Agent Support
+- Claude Code and Codex in one app
+- Instant switching between agents
+- Custom models and providers (BYOK)
+
+### Visual UI
+- Cursor-like desktop app
+- Diff previews and real-time tool execution
+- Built-in Git client with visual staging
+
+### Git Worktree Isolation
+- Each chat runs in its own isolated worktree
+- Background execution support
+- Branch safety - never accidentally commit to main
+
+### Plan Mode
+- Structured plans with markdown preview
+- Clarifying questions before execution
+- Extended thinking enabled by default
+
+### MCP & Plugins
+- Full server lifecycle management
+- Plugin marketplace
+- Rich tool display
+
+### More Original Features
+- Background agents (cloud sandboxes)
+- Live browser previews
+- Kanban board
+- Chat forking
+- Message queue
+- Voice input
+- Skills & slash commands
+- Custom sub-agents
+- Memory (CLAUDE.md support)
+- Cross platform (macOS, Windows, Linux)
+
+---
+
+## Comparison: Fork vs Upstream
+
+| Feature | Upstream (v0.0.72) | This Fork (v0.0.90) |
+|---------|-------------------|---------------------|
+| Local Mode | No | **Yes** |
+| Token Monitor | No | **Yes** |
+| Per-SubChat Models | Basic | **Advanced** |
+| Archive with Restore | No | **Yes** |
+| Chat Statistics | No | **Yes** |
+| Windows Shell Selection | No | **Yes** |
+| Persistent Errors | Basic | **Advanced** |
+| Custom Model Profiles | Single model | **Multiple models per profile** |
+| Codex Default | Previous | **GPT-5.4** |
+| Offline Quick Start | No | **Yes** |
+
+---
 
 ## Installation
 
-### Option 1: Build from source (free)
+### Build from Source (Free)
 
 ```bash
-# Prerequisites: Bun, Python 3.11, setuptools, Xcode Command Line Tools (macOS)
+# Prerequisites: Bun, Python 3.11, setuptools
+git clone https://github.com/YOUR_FORK/1codepulll.git
+cd 1codepulll
 bun install
-bun run claude:download  # Download Claude binary (required!)
-bun run codex:download   # Download Codex binary (required!)
+bun run claude:download  # Download Claude binary
+bun run codex:download   # Download Codex binary
 bun run build
-bun run package:mac  # or package:win, package:linux
+bun run package:mac      # or package:win, package:linux
 ```
 
-> **Important:** The `claude:download` and `codex:download` steps download required agent binaries. If you skip them, the app may build but agent functionality will not work correctly.
->
-> **Python note:** Python 3.11 is recommended for native module rebuilds. On Python 3.12+, make sure `setuptools` is installed (`pip install setuptools`).
+> **Note:** This fork can be built completely free. Use Local Mode with your own API keys.
 
-### Option 2: Subscribe to 1code.dev (recommended)
-
-Get pre-built releases + background agents support by subscribing at [1code.dev](https://1code.dev).
-
-Your subscription helps us maintain and improve 1Code.
-
-## Development
+### Development
 
 ```bash
 bun install
@@ -169,10 +218,83 @@ bun run codex:download   # First time only
 bun run dev
 ```
 
-## Feedback & Community
+---
 
-Join our [Discord](https://discord.gg/8ektTZGnj4) for support and discussions.
+## Fork Changelog
+
+### v0.0.90 (Current)
+- feat(local-mode): Complete offline operation without backend APIs
+- feat(monitor): Token usage analytics dashboard
+- feat(models): Per-subchat model selection with inheritance control
+- feat(archive): Archived chats with restore functionality
+- feat(stats): Chat details popover with comprehensive statistics
+- feat(windows): Shell type selection (Bash/PowerShell/CMD)
+- feat(errors): Persistent error state management
+- feat(codex): Upgraded to GPT-5.4 as default
+- feat(models): Enhanced custom model profiles (multiple models per profile)
+
+### Key Commits (48 total)
+```
+06a742d feat(sidebar): hide cloud features in local mode
+4b89b09 feat(settings): add local mode toggle and account connection UI
+b2af931 feat(onboarding): add "Use Locally" quick start option
+6ad1f53 feat(core): add local mode infrastructure
+bafcc96 feat(settings): add Monitor tab for token usage analytics
+cbe010f feat(usage): add token usage analytics router
+184d581 feat: Enhanced custom model profiles with multiple models
+c2f8aeb feat(terminal): add shell type selection
+... and 40 more
+```
+
+---
+
+## Contributing to This Fork
+
+We welcome contributions that align with the fork's focus:
+
+1. **Privacy-first features** - More offline/local capabilities
+2. **Model flexibility** - Support for more AI providers
+3. **Windows/Linux support** - Better cross-platform experience
+4. **Developer tools** - Analytics, debugging, monitoring
+
+---
+
+## Original Project Credits
+
+This project is a fork of [1Code](https://github.com/21st-dev/1code) by the [21st.dev](https://21st.dev) team.
+
+- **Original License:** Apache License 2.0
+- **Original Authors:** 21st.dev team
+- **Original Repository:** https://github.com/21st-dev/1code
+
+Please support the original project by subscribing at [1code.dev](https://1code.dev) if you use cloud features.
+
+---
 
 ## License
 
 Apache License 2.0 - see [LICENSE](LICENSE) for details.
+
+---
+
+## Community & Support
+
+- **Original Discord:** [discord.gg/8ektTZGnj4](https://discord.gg/8ektTZGnj4)
+- **Fork Issues:** Open an issue in this repository for fork-specific bugs/features
+- **Upstream Issues:** For core bugs, consider reporting to the original repo
+
+---
+
+## Quick Links
+
+| Resource | Link |
+|----------|------|
+| Original Project | [1code.dev](https://1code.dev) |
+| Original Repo | [github.com/21st-dev/1code](https://github.com/21st-dev/1code) |
+| This Fork | Your fork URL |
+| Documentation | [CLAUDE.md](CLAUDE.md) |
+| Build Instructions | See Installation section |
+
+---
+
+> Built with love by the community. Forked from 21st.dev's excellent 1Code project.
