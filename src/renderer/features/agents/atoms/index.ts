@@ -762,6 +762,45 @@ export type PendingAuthRetryMessage = {
 }
 export const pendingAuthRetryMessageAtom = atom<PendingAuthRetryMessage | null>(null)
 
+// Per-subChat error state for persistent error display
+// Unlike toast notifications, these persist until manually dismissed
+export type SubChatError = {
+  subChatId: string
+  title: string
+  message: string
+  category: string // PROCESS_CRASH, RATE_LIMIT_SDK, AUTH_FAILED_SDK, etc.
+  timestamp: number
+  debugInfo?: Record<string, unknown>
+}
+
+// Map<subChatId, SubChatError> - each subChat can have one active error
+export const subChatErrorsAtom = atom<Map<string, SubChatError>>(new Map())
+
+// Helper to set error for a subChat
+export const setErrorForSubChat = (
+  setter: (fn: (prev: Map<string, SubChatError>) => Map<string, SubChatError>) => void,
+  error: SubChatError
+) => {
+  setter((prev) => {
+    const next = new Map(prev)
+    next.set(error.subChatId, error)
+    return next
+  })
+}
+
+// Helper to clear error for a subChat
+export const clearErrorForSubChat = (
+  setter: (fn: (prev: Map<string, SubChatError>) => Map<string, SubChatError>) => void,
+  subChatId: string
+) => {
+  setter((prev) => {
+    if (!prev.has(subChatId)) return prev
+    const next = new Map(prev)
+    next.delete(subChatId)
+    return next
+  })
+}
+
 // Pending chat history file to inject into a newly created sub-chat
 // Set when user switches provider mid-chat, consumed by ChatInputArea on mount
 export interface PendingChatHistory {
