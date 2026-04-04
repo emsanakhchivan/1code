@@ -362,59 +362,14 @@ export const activeCustomModelIdAtom = atomWithStorage<string | null>(
   { getOnInit: true },
 )
 
-// Per-subChat storage for custom profile/model selection
-// This ensures each subChat remembers its own custom model selection
-const subChatProfileIdsStorageAtom = atomWithStorage<Record<string, string | null>>(
-  "agents:subChatProfileIds",
-  {},
-  undefined,
-  { getOnInit: true },
-)
-
-const subChatCustomModelIdsStorageAtom = atomWithStorage<Record<string, string | null>>(
-  "agents:subChatCustomModelIds",
-  {},
-  undefined,
-  { getOnInit: true },
-)
-
-// AtomFamily for per-subChat profile ID
-export const subChatProfileIdAtomFamily = atomFamily((subChatId: string) =>
-  atom(
-    (get) => {
-      if (!subChatId) return get(activeProfileIdAtom)
-      return get(subChatProfileIdsStorageAtom)[subChatId] ?? null
-    },
-    (get, set, newProfileId: string | null) => {
-      if (!subChatId) {
-        set(activeProfileIdAtom, newProfileId)
-        return
-      }
-      const current = get(subChatProfileIdsStorageAtom)
-      if (current[subChatId] === newProfileId) return
-      set(subChatProfileIdsStorageAtom, { ...current, [subChatId]: newProfileId })
-    },
-  ),
-)
-
-// AtomFamily for per-subChat custom model ID
-export const subChatCustomModelIdAtomFamily = atomFamily((subChatId: string) =>
-  atom(
-    (get) => {
-      if (!subChatId) return get(activeCustomModelIdAtom)
-      return get(subChatCustomModelIdsStorageAtom)[subChatId] ?? null
-    },
-    (get, set, newModelId: string | null) => {
-      if (!subChatId) {
-        set(activeCustomModelIdAtom, newModelId)
-        return
-      }
-      const current = get(subChatCustomModelIdsStorageAtom)
-      if (current[subChatId] === newModelId) return
-      set(subChatCustomModelIdsStorageAtom, { ...current, [subChatId]: newModelId })
-    },
-  ),
-)
+// Per-subChat storage for custom profile/model selection - re-exported from features/agents/atoms
+// to ensure single source of truth and avoid duplicate atom instances with same localStorage keys
+export {
+  subChatProfileIdsStorageAtom,
+  subChatCustomModelIdsStorageAtom,
+  subChatProfileIdAtomFamily,
+  subChatCustomModelIdAtomFamily,
+} from "../../features/agents/atoms"
 
 // Auto-fallback to offline mode when internet is unavailable
 export const autoOfflineModeAtom = atomWithStorage<boolean>(
