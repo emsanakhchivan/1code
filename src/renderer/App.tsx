@@ -21,6 +21,7 @@ import {
   apiKeyOnboardingCompletedAtom,
   billingMethodAtom,
   codexOnboardingCompletedAtom,
+  localModeAtom,
 } from "./lib/atoms"
 import { appStore } from "./lib/jotai-store"
 import { VSCodeThemeProvider } from "./lib/themes/theme-provider"
@@ -47,6 +48,7 @@ function ThemedToaster() {
 function AppContent() {
   const billingMethod = useAtomValue(billingMethodAtom)
   const setBillingMethod = useSetAtom(billingMethodAtom)
+  const localMode = useAtomValue(localModeAtom)
   const anthropicOnboardingCompleted = useAtomValue(
     anthropicOnboardingCompletedAtom
   )
@@ -130,13 +132,22 @@ function AppContent() {
 
   // Determine which page to show:
   // 1. No billing method selected -> BillingMethodPage
-  // 2. Claude subscription selected but not completed -> AnthropicOnboardingPage
-  // 3. Codex selected but not completed -> CodexOnboardingPage
-  // 4. API key or custom model selected but not completed -> ApiKeyOnboardingPage
-  // 5. No valid project selected -> SelectRepoPage
-  // 6. Otherwise -> AgentsLayout
+  // 2. Local mode selected -> Skip all auth onboarding, go to project selection or main app
+  // 3. Claude subscription selected but not completed -> AnthropicOnboardingPage
+  // 4. Codex selected but not completed -> CodexOnboardingPage
+  // 5. API key or custom model selected but not completed -> ApiKeyOnboardingPage
+  // 6. No valid project selected -> SelectRepoPage
+  // 7. Otherwise -> AgentsLayout
   if (!billingMethod) {
     return <BillingMethodPage />
+  }
+
+  // Local mode: skip all auth onboarding
+  if (billingMethod === "local-mode") {
+    if (!validatedProject && !isLoadingProjects) {
+      return <SelectRepoPage />
+    }
+    return <AgentsLayout />
   }
 
   if (billingMethod === "claude-subscription" && !anthropicOnboardingCompleted) {
