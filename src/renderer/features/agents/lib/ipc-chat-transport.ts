@@ -27,6 +27,7 @@ import {
   MODEL_ID_MAP,
   pendingAuthRetryMessageAtom,
   pendingUserQuestionsAtom,
+  subChatErrorsAtom,
   subChatModelIdAtomFamily,
 } from "../atoms"
 import { useAgentSubChatStore } from "../stores/sub-chat-store"
@@ -504,6 +505,19 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
                     },
                   },
                 })
+
+                // Set persistent error state for banner display
+                const currentErrors = appStore.get(subChatErrorsAtom)
+                const newErrors = new Map(currentErrors)
+                newErrors.set(this.config.subChatId, {
+                  subChatId: this.config.subChatId,
+                  title,
+                  message: rawDescription,
+                  category,
+                  timestamp: Date.now(),
+                  debugInfo: chunk.debugInfo,
+                })
+                appStore.set(subChatErrorsAtom, newErrors)
               }
 
               // Try to enqueue, but don't crash if stream is already closed

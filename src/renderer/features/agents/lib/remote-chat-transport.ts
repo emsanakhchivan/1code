@@ -1,5 +1,7 @@
 import type { ChatTransport, UIMessage } from "ai"
 import { toast } from "sonner"
+import { subChatErrorsAtom } from "../atoms"
+import { appStore } from "../../../lib/jotai-store"
 
 // Cache the API base URL (fetched once from main process)
 let cachedApiBase: string | null = null
@@ -103,10 +105,25 @@ export class RemoteChatTransport implements ChatTransport<UIMessage> {
     if (!result.ok) {
       console.error(`[RemoteTransport] ERROR`, { subId, status: result.status, error: result.error })
 
+      // Helper to set error in atom
+      const setRemoteError = (title: string, message: string, category: string) => {
+        const currentErrors = appStore.get(subChatErrorsAtom)
+        const newErrors = new Map(currentErrors)
+        newErrors.set(this.config.subChatId, {
+          subChatId: this.config.subChatId,
+          title,
+          message,
+          category,
+          timestamp: Date.now(),
+        })
+        appStore.set(subChatErrorsAtom, newErrors)
+      }
+
       if (result.status === 401) {
         toast.error("Authentication failed", {
           description: "Please sign in again",
         })
+        setRemoteError("Authentication failed", "Please sign in again to continue.", "AUTH_ERROR")
         throw new Error("Authentication required")
       }
 
@@ -114,12 +131,14 @@ export class RemoteChatTransport implements ChatTransport<UIMessage> {
         toast.error("Usage limit reached", {
           description: "You've hit your sandbox usage limit",
         })
+        setRemoteError("Usage limit reached", "You've hit your sandbox usage limit.", "USAGE_LIMIT")
         throw new Error("Usage limit reached")
       }
 
       toast.error("Request failed", {
         description: result.error || `Server returned ${result.status}`,
       })
+      setRemoteError("Request failed", result.error || `Server returned ${result.status}`, "NETWORK_ERROR")
       throw new Error(`Remote chat failed: ${result.status}`)
     }
 
@@ -204,6 +223,17 @@ export class RemoteChatTransport implements ChatTransport<UIMessage> {
 
     cleanupError = window.desktopApi.onStreamError(streamId, (error: string) => {
       console.error(`[RemoteTransport] Stream error sub=${subId}:`, error)
+      // Set persistent error state for banner display
+      const currentErrors = appStore.get(subChatErrorsAtom)
+      const newErrors = new Map(currentErrors)
+      newErrors.set(this.config.subChatId, {
+        subChatId: this.config.subChatId,
+        title: "Stream error",
+        message: error || "An unexpected stream error occurred.",
+        category: "STREAM_ERROR",
+        timestamp: Date.now(),
+      })
+      appStore.set(subChatErrorsAtom, newErrors)
       streamError = new Error(error)
       if (rejectNext) {
         rejectNext(streamError)

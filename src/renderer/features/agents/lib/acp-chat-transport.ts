@@ -15,6 +15,7 @@ import {
   pendingAuthRetryMessageAtom,
   subChatCodexModelIdAtomFamily,
   subChatCodexThinkingAtomFamily,
+  subChatErrorsAtom,
 } from "../atoms"
 import { CODEX_MODELS, type CodexThinkingLevel } from "./models"
 import { useAgentSubChatStore } from "../stores/sub-chat-store"
@@ -233,6 +234,17 @@ export class ACPChatTransport implements ChatTransport<UIMessage> {
                 toast.error("Codex error", {
                   description: chunk.errorText || "An unexpected Codex error occurred.",
                 })
+                // Set persistent error state for banner display
+                const currentErrors = appStore.get(subChatErrorsAtom)
+                const newErrors = new Map(currentErrors)
+                newErrors.set(this.config.subChatId, {
+                  subChatId: this.config.subChatId,
+                  title: "Codex error",
+                  message: chunk.errorText || "An unexpected Codex error occurred.",
+                  category: "CODEX_ERROR",
+                  timestamp: Date.now(),
+                })
+                appStore.set(subChatErrorsAtom, newErrors)
               }
 
               try {
