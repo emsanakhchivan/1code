@@ -20,11 +20,33 @@ async function getApiBase(): Promise<string> {
 }
 
 /**
+ * Check if local mode is enabled
+ * Reads directly from localStorage to avoid Jotai dependency in this utility
+ */
+function isLocalModeEnabled(): boolean {
+  if (typeof window === "undefined") return false
+  return localStorage.getItem("preferences:local-mode") === "true"
+}
+
+/**
  * Custom fetch that goes through Electron IPC
  * Automatically adds auth token and bypasses CORS
  * Replaces placeholder URL with actual API base from env
+ *
+ * When local mode is enabled, returns mock empty responses instead of making network calls
  */
 const signedFetch: typeof fetch = async (input, init) => {
+  // Check local mode first - block all remote API calls
+  if (isLocalModeEnabled()) {
+    // Return mock empty response for local mode
+    return {
+      ok: true,
+      status: 200,
+      json: async () => null,
+      text: async () => "null",
+    } as Response
+  }
+
   if (typeof window === "undefined" || !window.desktopApi?.signedFetch) {
     throw new Error("Desktop API not available")
   }

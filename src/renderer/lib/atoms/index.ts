@@ -530,6 +530,17 @@ export const analyticsOptOutAtom = atomWithStorage<boolean>(
   { getOnInit: true },
 )
 
+// Preferences - Local Mode
+// When true, disable all 21st.dev backend API calls
+// User can still use the app with their own API keys (Claude/Codex/Custom/Ollama)
+// Features disabled: remote chat sync, team features, automations, voice transcription (unless own OpenAI key)
+export const localModeAtom = atomWithStorage<boolean>(
+  "preferences:local-mode",
+  false, // Default: use 21st.dev APIs
+  undefined,
+  { getOnInit: true },
+)
+
 // Beta: Enable git features in diff sidebar (commit, staging, file selection)
 // When enabled, shows checkboxes for file selection and commit UI in diff sidebar
 // When disabled, shows simple file list with "Create PR" button
@@ -858,6 +869,7 @@ export type BillingMethod =
   | "custom-model"
   | "codex-subscription"
   | "codex-api-key"
+  | "local-mode"
   | null
 
 export const billingMethodAtom = atomWithStorage<BillingMethod>(
