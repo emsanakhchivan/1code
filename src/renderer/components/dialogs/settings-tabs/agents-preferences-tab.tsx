@@ -7,6 +7,7 @@ import {
   defaultAgentModeAtom,
   desktopNotificationsEnabledAtom,
   extendedThinkingEnabledAtom,
+  localModeAtom,
   notifyWhenFocusedAtom,
   soundNotificationsEnabledAtom,
   preferredEditorAtom,
@@ -152,6 +153,7 @@ export function AgentsPreferencesTab() {
   const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = useAtom(desktopNotificationsEnabledAtom)
   const [notifyWhenFocused, setNotifyWhenFocused] = useAtom(notifyWhenFocusedAtom)
   const [analyticsOptOut, setAnalyticsOptOut] = useAtom(analyticsOptOutAtom)
+  const [localMode, setLocalMode] = useAtom(localModeAtom)
   const [ctrlTabTarget, setCtrlTabTarget] = useAtom(ctrlTabTargetAtom)
   const [autoAdvanceTarget, setAutoAdvanceTarget] = useAtom(autoAdvanceTargetAtom)
   const [defaultAgentMode, setDefaultAgentMode] = useAtom(defaultAgentModeAtom)
@@ -500,6 +502,25 @@ export function AgentsPreferencesTab() {
               ))}
             </SelectContent>
           </Select>
+        </div>
+      </div>
+
+      {/* Local Mode */}
+      <div className="bg-background rounded-lg border border-border overflow-hidden">
+        <div className="flex items-center justify-between gap-6 p-4">
+          <div className="flex flex-col space-y-1">
+            <span className="text-sm font-medium text-foreground">
+              Local Mode
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Disable all 21st.dev backend connections. Use with your own API keys only.
+              <span className="text-foreground/70"> Remote sync, teams, and automations will be unavailable.</span>
+            </span>
+          </div>
+          <Switch
+            checked={localMode}
+            onCheckedChange={setLocalMode}
+          />
         </div>
       </div>
 

@@ -1,8 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useAtomValue, useSetAtom } from "jotai"
+import { Cloud } from "lucide-react"
 import { Input } from "../../ui/input"
 import { Label } from "../../ui/label"
 import { IconSpinner } from "../../../icons"
 import { toast } from "sonner"
+import { localModeAtom, billingMethodAtom } from "../../../lib/atoms"
+import { Button } from "../../ui/button"
 
 // Hook to detect narrow screen
 function useIsNarrowScreen(): boolean {
@@ -33,8 +37,12 @@ export function AgentsProfileTab() {
   const [user, setUser] = useState<DesktopUser | null>(null)
   const [fullName, setFullName] = useState("")
   const [isLoading, setIsLoading] = useState(true)
+  const [isConnecting, setIsConnecting] = useState(false)
   const isNarrowScreen = useIsNarrowScreen()
   const savedNameRef = useRef("")
+  const localMode = useAtomValue(localModeAtom)
+  const setLocalMode = useSetAtom(localModeAtom)
+  const setBillingMethod = useSetAtom(billingMethodAtom)
 
   // Fetch real user data from desktop API
   useEffect(() => {
@@ -70,6 +78,43 @@ export function AgentsProfileTab() {
     }
   }, [fullName])
 
+  const handleConnectAccount = async () => {
+    setIsConnecting(true)
+    try {
+      // Start auth flow
+      await window.desktopApi?.startAuthFlow()
+      // The auth success event will be handled by App.tsx
+      // After auth, we'll disable local mode
+    } catch (error) {
+      console.error("Error starting auth flow:", error)
+      toast.error(
+        error instanceof Error ? error.message : "Failed to start authentication"
+      )
+      setIsConnecting(false)
+    }
+  }
+
+  // Listen for auth success to disable local mode
+  useEffect(() => {
+    if (!localMode) return
+
+    const unsubscribe = window.desktopApi?.onAuthSuccess((authenticatedUser) => {
+      if (authenticatedUser) {
+        setUser(authenticatedUser)
+        setFullName(authenticatedUser.name || "")
+        savedNameRef.current = authenticatedUser.name || ""
+        setLocalMode(false)
+        setBillingMethod("claude-subscription") // Default to Claude subscription after connecting
+        setIsConnecting(false)
+        toast.success("Account connected successfully!")
+      }
+    })
+
+    return () => {
+      if (unsubscribe) unsubscribe()
+    }
+  }, [localMode, setLocalMode, setBillingMethod])
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -88,44 +133,78 @@ export function AgentsProfileTab() {
             <h3 className="text-sm font-medium text-foreground">Account</h3>
           </div>
         )}
-        <div className="bg-background rounded-lg border border-border overflow-hidden">
-          {/* Full Name Field */}
-          <div className="flex items-center justify-between p-4">
-            <div className="flex-1">
-              <Label className="text-sm font-medium">Full Name</Label>
-              <p className="text-sm text-muted-foreground">
-                This is your display name
-              </p>
-            </div>
-            <div className="flex-shrink-0 w-80">
-              <Input
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                onBlur={handleBlurSave}
-                className="w-full"
-                placeholder="Enter your name"
-              />
+
+        {/* Local Mode - Show Connect Account option */}
+        {localMode ? (
+          <div className="bg-background rounded-lg border border-border overflow-hidden">
+            <div className="p-6 text-center space-y-4">
+              <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mx-auto">
+                <Cloud className="w-6 h-6 text-muted-foreground" />
+              </div>
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium">Using Local Mode</h4>
+                <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                  You're using the app without a 21st.dev account. Connect to enable team features,
+                  chat sync across devices, and automations.
+                </p>
+              </div>
+              <Button
+                onClick={handleConnectAccount}
+                disabled={isConnecting}
+                className="min-w-[120px]"
+              >
+                {isConnecting ? (
+                  <>
+                    <IconSpinner className="h-4 w-4 mr-2" />
+                    Connecting...
+                  </>
+                ) : (
+                  "Connect Account"
+                )}
+              </Button>
             </div>
           </div>
+        ) : (
+          /* Connected account - show profile fields */
+          <div className="bg-background rounded-lg border border-border overflow-hidden">
+            {/* Full Name Field */}
+            <div className="flex items-center justify-between p-4">
+              <div className="flex-1">
+                <Label className="text-sm font-medium">Full Name</Label>
+                <p className="text-sm text-muted-foreground">
+                  This is your display name
+                </p>
+              </div>
+              <div className="flex-shrink-0 w-80">
+                <Input
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  onBlur={handleBlurSave}
+                  className="w-full"
+                  placeholder="Enter your name"
+                />
+              </div>
+            </div>
 
-          {/* Email Field (read-only) */}
-          <div className="flex items-center justify-between p-4 border-t border-border">
-            <div className="flex-1">
-              <Label className="text-sm font-medium">Email</Label>
-              <p className="text-sm text-muted-foreground">
-                Your account email
-              </p>
+            {/* Email Field (read-only) */}
+            <div className="flex items-center justify-between p-4 border-t border-border">
+              <div className="flex-1">
+                <Label className="text-sm font-medium">Email</Label>
+                <p className="text-sm text-muted-foreground">
+                  Your account email
+                </p>
+              </div>
+              <div className="flex-shrink-0 w-80">
+                <Input
+                  value={user?.email || ""}
+                  disabled
+                  className="w-full opacity-60"
+                />
+              </div>
             </div>
-            <div className="flex-shrink-0 w-80">
-              <Input
-                value={user?.email || ""}
-                disabled
-                className="w-full opacity-60"
-              />
-            </div>
+
           </div>
-
-        </div>
+        )}
       </div>
 
     </div>
