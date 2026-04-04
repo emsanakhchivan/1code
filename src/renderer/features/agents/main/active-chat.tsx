@@ -147,6 +147,8 @@ import {
   selectedCommitAtom,
   selectedDiffFilePathAtom,
   setLoading,
+  subChatErrorsAtom,
+  clearErrorForSubChat,
   subChatFilesAtom,
   agentsSidebarOpenAtom,
   subChatCodexModelIdAtomFamily,
@@ -231,6 +233,7 @@ import { AgentUserMessageBubble } from "../ui/agent-user-message-bubble"
 import { AgentUserQuestion, type AgentUserQuestionHandle } from "../ui/agent-user-question"
 import { AgentsHeaderControls } from "../ui/agents-header-controls"
 import { ChatTitleEditor } from "../ui/chat-title-editor"
+import { ErrorInfoBanner } from "../ui/error-info-banner"
 import { MobileChatHeader } from "../ui/mobile-chat-header"
 import { QuickCommentInput } from "../ui/quick-comment-input"
 import { SubChatSelector } from "../ui/sub-chat-selector"
@@ -2071,6 +2074,9 @@ const ChatViewInner = memo(function ChatViewInner({
   // PR creation loading state - from atom to allow resetting after message sent
   const setIsCreatingPr = useSetAtom(isCreatingPrAtom)
 
+  // SubChat errors - clear on new message
+  const setSubChatErrors = useSetAtom(subChatErrorsAtom)
+
   // Rollback state
   const [isRollingBack, setIsRollingBack] = useState(false)
 
@@ -3836,6 +3842,9 @@ const ChatViewInner = memo(function ChatViewInner({
       return
     }
 
+    // Clear error banner on new message
+    clearErrorForSubChat(setSubChatErrors, subChatId)
+
     // Clear any expired questions when user sends a new message
     setExpiredQuestionsMap((current) => {
       if (current.has(subChatId)) {
@@ -4101,6 +4110,9 @@ const ChatViewInner = memo(function ChatViewInner({
     const item = popItemFromQueue(subChatId, itemId)
     if (!item) return
 
+    // Clear error banner on new message
+    clearErrorForSubChat(setSubChatErrors, subChatId)
+
     try {
       // Stop current stream if streaming and wait for status to become ready.
       // The server-side save block preserves sessionId on abort, so the next
@@ -4200,6 +4212,9 @@ const ChatViewInner = memo(function ChatViewInner({
     if (sandboxSetupStatus !== "ready") {
       return
     }
+
+    // Clear error banner on new message
+    clearErrorForSubChat(setSubChatErrors, subChatId)
 
     // Get value from uncontrolled editor
     const inputValue = editorRef.current?.getValue() || ""
@@ -4751,6 +4766,9 @@ const ChatViewInner = memo(function ChatViewInner({
           </div>
         </div>
       )}
+
+      {/* Error banner - persistent error display for this subChat (above input) */}
+      <ErrorInfoBanner subChatId={subChatId} />
 
       {/* Stacked cards container - queue + status */}
       {shouldShowStackedCards && (
