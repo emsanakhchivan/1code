@@ -125,6 +125,10 @@ contextBridge.exposeInMainWorld("desktopApi", {
   // Analytics
   setAnalyticsOptOut: (optedOut: boolean) => ipcRenderer.invoke("analytics:set-opt-out", optedOut),
 
+  // GPU acceleration
+  getGpuAccelerationEnabled: () => ipcRenderer.invoke("gpu:get-acceleration-enabled") as Promise<boolean>,
+  setGpuAccelerationEnabled: (enabled: boolean) => ipcRenderer.invoke("gpu:set-acceleration-enabled", enabled) as Promise<boolean>,
+
   // Native features
   setBadge: (count: number | null) => ipcRenderer.invoke("app:set-badge", count),
   setBadgeIcon: (imageData: string | null) => ipcRenderer.invoke("app:set-badge-icon", imageData),
@@ -329,6 +333,9 @@ export interface DesktopApi {
   toggleDevTools: () => Promise<void>
   unlockDevTools: () => Promise<void>
   setAnalyticsOptOut: (optedOut: boolean) => Promise<void>
+  // GPU acceleration
+  getGpuAccelerationEnabled: () => Promise<boolean>
+  setGpuAccelerationEnabled: (enabled: boolean) => Promise<boolean>
   setBadge: (count: number | null) => Promise<void>
   setBadgeIcon: (imageData: string | null) => Promise<void>
   showNotification: (options: { title: string; body: string }) => Promise<void>

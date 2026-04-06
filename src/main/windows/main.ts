@@ -20,6 +20,10 @@ import { hasActiveClaudeSessions, abortAllClaudeSessions } from "../lib/trpc/rou
 import { hasActiveCodexStreams, abortAllCodexStreams } from "../lib/trpc/routers/codex"
 import { registerThemeScannerIPC } from "../lib/vscode-theme-scanner"
 import { windowManager } from "./window-manager"
+import {
+  getGpuAccelerationEnabled,
+  setGpuAccelerationEnabled,
+} from "../lib/app-settings"
 
 // Flag to bypass close confirmation when app.quit() has already been confirmed
 let isQuitting = false
@@ -282,6 +286,15 @@ function registerIpcHandlers(): void {
   ipcMain.handle("analytics:set-opt-out", async (_event, optedOut: boolean) => {
     const { setOptOut } = await import("../lib/analytics")
     setOptOut(optedOut)
+  })
+
+  // GPU acceleration settings
+  ipcMain.handle("gpu:get-acceleration-enabled", () => {
+    return getGpuAccelerationEnabled()
+  })
+  ipcMain.handle("gpu:set-acceleration-enabled", (_event, enabled: boolean) => {
+    setGpuAccelerationEnabled(enabled)
+    return true
   })
 
   // Shell

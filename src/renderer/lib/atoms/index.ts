@@ -541,6 +541,17 @@ export const localModeAtom = atomWithStorage<boolean>(
   { getOnInit: true },
 )
 
+// Preferences - GPU Hardware Acceleration
+// When false (default): GPU acceleration disabled, more stable on systems with many workspaces
+// When true: GPU acceleration enabled, may cause GPU crashes with many workspaces
+// NOTE: Requires app restart to take effect
+export const gpuAccelerationEnabledAtom = atomWithStorage<boolean>(
+  "preferences:gpu-acceleration-enabled",
+  false, // Default OFF for stability
+  undefined,
+  { getOnInit: true },
+)
+
 // Beta: Enable git features in diff sidebar (commit, staging, file selection)
 // When enabled, shows checkboxes for file selection and commit UI in diff sidebar
 // When disabled, shows simple file list with "Create PR" button

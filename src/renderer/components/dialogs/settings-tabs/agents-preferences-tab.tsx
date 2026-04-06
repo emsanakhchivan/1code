@@ -1,4 +1,4 @@
-import { useAtom } from "jotai"
+import { useAtom, useAtomValue } from "jotai"
 import { useEffect, useState } from "react"
 import {
   analyticsOptOutAtom,
@@ -7,6 +7,8 @@ import {
   defaultAgentModeAtom,
   desktopNotificationsEnabledAtom,
   extendedThinkingEnabledAtom,
+  gpuAccelerationEnabledAtom,
+  isDesktopAtom,
   localModeAtom,
   notifyWhenFocusedAtom,
   soundNotificationsEnabledAtom,
@@ -154,6 +156,7 @@ export function AgentsPreferencesTab() {
   const [notifyWhenFocused, setNotifyWhenFocused] = useAtom(notifyWhenFocusedAtom)
   const [analyticsOptOut, setAnalyticsOptOut] = useAtom(analyticsOptOutAtom)
   const [localMode, setLocalMode] = useAtom(localModeAtom)
+  const [gpuAccelerationEnabled, setGpuAccelerationEnabled] = useAtom(gpuAccelerationEnabledAtom)
   const [ctrlTabTarget, setCtrlTabTarget] = useAtom(ctrlTabTargetAtom)
   const [autoAdvanceTarget, setAutoAdvanceTarget] = useAtom(autoAdvanceTargetAtom)
   const [defaultAgentMode, setDefaultAgentMode] = useAtom(defaultAgentModeAtom)
@@ -162,6 +165,23 @@ export function AgentsPreferencesTab() {
     preferredTerminalShellAtom,
   )
   const isNarrowScreen = useIsNarrowScreen()
+  const isDesktop = useAtomValue(isDesktopAtom)
+
+  // Sync GPU acceleration setting from main process on mount
+  useEffect(() => {
+    const syncGpuSetting = async () => {
+      try {
+        const mainProcessGpuEnabled = await window.desktopApi?.getGpuAccelerationEnabled()
+        // If main process has a different value, sync it to localStorage
+        if (mainProcessGpuEnabled !== undefined && mainProcessGpuEnabled !== gpuAccelerationEnabled) {
+          setGpuAccelerationEnabled(mainProcessGpuEnabled)
+        }
+      } catch (error) {
+        console.error("Failed to sync GPU setting from main process:", error)
+      }
+    }
+    syncGpuSetting()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const terminalShellOptions: { value: PreferredTerminalShellType; label: string }[] =
     isWindows()
@@ -523,6 +543,40 @@ export function AgentsPreferencesTab() {
           />
         </div>
       </div>
+
+      {/* GPU Acceleration - Only show in desktop app */}
+      {isDesktop && (
+        <div className="bg-background rounded-lg border border-border overflow-hidden">
+          <div className="flex items-center justify-between gap-6 p-4">
+            <div className="flex flex-col space-y-1">
+              <span className="text-sm font-medium text-foreground">
+                GPU Acceleration
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Enable GPU hardware acceleration for rendering. May cause crashes with many workspaces.
+                <span className="text-foreground/70"> Default is off for stability.</span>
+              </span>
+            </div>
+            <Switch
+              checked={gpuAccelerationEnabled}
+              onCheckedChange={async (enabled) => {
+                setGpuAccelerationEnabled(enabled)
+                // Also save to main process settings (for next launch)
+                try {
+                  await window.desktopApi?.setGpuAccelerationEnabled(enabled)
+                } catch (error) {
+                  console.error("Failed to save GPU setting to main process:", error)
+                }
+              }}
+            />
+          </div>
+          <div className="px-4 pb-3">
+            <span className="text-xs text-amber-600 dark:text-amber-500">
+              Requires app restart to take effect
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Privacy */}
       <div className="bg-background rounded-lg border border-border overflow-hidden">

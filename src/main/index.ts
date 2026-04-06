@@ -28,6 +28,7 @@ import {
 } from "./lib/cli"
 import { cleanupGitWatchers } from "./lib/git/watcher"
 import { cancelAllPendingOAuth, handleMcpOAuthCallback } from "./lib/mcp-auth"
+import { getGpuAccelerationEnabled } from "./lib/app-settings"
 import { getAllMcpConfigHandler, hasActiveClaudeSessions, abortAllClaudeSessions } from "./lib/trpc/routers/claude"
 import { getAllCodexMcpConfigHandler, hasActiveCodexStreams, abortAllCodexStreams } from "./lib/trpc/routers/codex"
 import {
@@ -57,6 +58,17 @@ if (IS_DEV) {
 // Increase V8 old-space limit for renderer/main processes to reduce OOM frequency
 // under heavy multi-chat workloads. Must be set before app readiness/window creation.
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=8192")
+
+// GPU acceleration setting - MUST be set before app is ready
+// Default: DISABLED for stability (GPU crashes with many workspaces)
+// User can enable in Settings > Preferences (requires restart)
+const gpuAccelerationEnabled = getGpuAccelerationEnabled()
+if (!gpuAccelerationEnabled) {
+  app.disableHardwareAcceleration()
+  console.log("[App] GPU hardware acceleration disabled (default for stability)")
+} else {
+  console.log("[App] GPU hardware acceleration enabled (user preference)")
+}
 
 // Initialize Sentry before app is ready (production only)
 if (app.isPackaged && !IS_DEV) {
