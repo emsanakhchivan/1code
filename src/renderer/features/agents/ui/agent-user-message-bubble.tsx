@@ -12,6 +12,7 @@ import {
 import { AgentImageItem } from "./agent-image-item"
 import { RenderFileMentions, extractTextMentions, TextMentionBlocks } from "../mentions/render-file-mentions"
 import { useSearchHighlight, useSearchQuery } from "../search"
+import { CopyButton } from "./message-action-buttons"
 
 interface AgentUserMessageBubbleProps {
   messageId: string
@@ -281,8 +282,9 @@ export const AgentUserMessageBubble = memo(function AgentUserMessageBubble({
       <Dialog open={isExpanded} onOpenChange={setIsExpanded}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-sm font-medium text-muted-foreground">
-              Full message
+            <DialogTitle className="text-sm font-medium text-muted-foreground flex items-center justify-between">
+              <span>Full message</span>
+              <CopyButton text={textContent} />
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
