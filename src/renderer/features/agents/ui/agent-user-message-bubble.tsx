@@ -282,9 +282,8 @@ export const AgentUserMessageBubble = memo(function AgentUserMessageBubble({
       <Dialog open={isExpanded} onOpenChange={setIsExpanded}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-sm font-medium text-muted-foreground flex items-center justify-between">
-              <span>Full message</span>
-              <CopyButton text={textContent} />
+            <DialogTitle className="text-sm font-medium text-muted-foreground">
+              Full message
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
@@ -294,6 +293,9 @@ export const AgentUserMessageBubble = memo(function AgentUserMessageBubble({
             <div className="whitespace-pre-wrap text-sm">
               <RenderFileMentions text={cleanedText} />
             </div>
+          </div>
+          <div className="flex justify-end pt-2 border-t">
+            <CopyButton text={textContent} />
           </div>
         </DialogContent>
       </Dialog>

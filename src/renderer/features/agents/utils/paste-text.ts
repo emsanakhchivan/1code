@@ -16,108 +16,13 @@ const VERY_LARGE_THRESHOLD = 1_000_000
 // Callback type for adding large pasted text as a file
 export type AddPastedTextFn = (text: string) => Promise<void>
 
-// Mention ID prefixes - copied from agents-mentions-editor.tsx to avoid circular imports
-const MENTION_PREFIXES = {
-  FILE: "file:",
-  FOLDER: "folder:",
-  SKILL: "skill:",
-  AGENT: "agent:",
-  TOOL: "tool:",
-} as const
-
-// FileMentionOption type - minimal version for paste handling
-interface FileMentionOption {
-  id: string
-  label: string
-  path: string
-  repository: string
-  type?: "file" | "folder" | "skill" | "agent" | "tool"
-}
-
-// Create icon element for mention chip (simplified version)
-function createFileIcon(filename: string, type?: string): HTMLElement {
-  const iconSpan = document.createElement("span")
-  iconSpan.className = "flex-shrink-0"
-
-  // Simple file/folder icons using text symbols
-  if (type === "folder") {
-    iconSpan.textContent = "📁"
-  } else if (type === "skill") {
-    iconSpan.textContent = "⚡"
-  } else if (type === "agent") {
-    iconSpan.textContent = "🤖"
-  } else if (type === "tool") {
-    iconSpan.textContent = "🔧"
-  } else {
-    // File icon - could be enhanced with extension-specific icons
-    iconSpan.textContent = "📄"
-  }
-
-  return iconSpan
-}
-
-// Create styled mention chip for paste insertion
-function createMentionNode(option: FileMentionOption): HTMLSpanElement {
-  const span = document.createElement("span")
-  span.setAttribute("contenteditable", "false")
-  span.setAttribute("data-mention-id", option.id)
-  span.setAttribute("data-mention-type", option.type || "file")
-  span.className =
-    "inline-flex items-center gap-1 px-[6px] py-[1px] rounded-[4px] text-sm align-middle bg-black/[0.04] dark:bg-white/[0.08] text-foreground/80"
-
-  // Create icon element
-  const iconElement = createFileIcon(option.label, option.type)
-  span.appendChild(iconElement)
-
-  const label = document.createElement("span")
-  label.textContent = option.label
-  span.appendChild(label)
-
-  return span
-}
-
-// Parse mention ID to create FileMentionOption
-function parseMentionId(id: string): FileMentionOption | null {
-  if (id.startsWith(MENTION_PREFIXES.FILE) || id.startsWith(MENTION_PREFIXES.FOLDER)) {
-    const parts = id.split(":")
-    if (parts.length >= 3) {
-      const type = parts[0] as "file" | "folder"
-      const repo = parts[1]
-      const path = parts.slice(2).join(":")
-      const name = path.split("/").pop() || path
-      return { id, label: name, path, repository: repo, type }
-    }
-  }
-  if (id.startsWith(MENTION_PREFIXES.SKILL)) {
-    const skillName = id.slice(MENTION_PREFIXES.SKILL.length)
-    return { id, label: skillName, path: "", repository: "", type: "skill" }
-  }
-  if (id.startsWith(MENTION_PREFIXES.AGENT)) {
-    const agentName = id.slice(MENTION_PREFIXES.AGENT.length)
-    return { id, label: agentName, path: "", repository: "", type: "agent" }
-  }
-  if (id.startsWith(MENTION_PREFIXES.TOOL)) {
-    const toolPath = id.slice(MENTION_PREFIXES.TOOL.length)
-    if (toolPath.startsWith("mcp__")) {
-      const parts = toolPath.split("__")
-      const toolName = parts.length >= 3 ? parts.slice(2).join("__") : toolPath
-      const displayName = toolName
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, (c) => c.toUpperCase())
-        .trim()
-      return { id, label: displayName, path: toolPath, repository: "", type: "tool" }
-    }
-    return { id, label: toolPath, path: toolPath, repository: "", type: "tool" }
-  }
-  return null
-}
-
 /**
- * Insert text with mentions at the current cursor position in a contentEditable element.
- * Parses @[mention:id] patterns and converts them to styled mention chips.
+ * Insert text at the current cursor position in a contentEditable element.
  * Truncates large text to prevent browser freeze.
+ * Also accounts for existing content to prevent total size from exceeding limit.
+ * Uses execCommand to preserve browser's undo history.
  *
- * @param text - The text to insert (may contain @[mention:id] patterns)
+ * @param text - The text to insert
  * @param editableElement - The contentEditable element (used for size calculation)
  */
 export function insertTextAtCursor(text: string, editableElement: Element): void {
@@ -153,83 +58,11 @@ export function insertTextAtCursor(text: string, editableElement: Element): void
     }
   }
 
-  // Check if text contains mention patterns
-  const regex = /@\[([^\]]+)\]/g
-  const hasMentions = regex.test(textToInsert)
-
-  if (!hasMentions) {
-    // No mentions - insert as plain text using execCommand (preserves undo history)
-    // eslint-disable-next-line deprecation/deprecation
-    document.execCommand("insertText", false, textToInsert)
-    return
-  }
-
-  // Has mentions - need to insert DOM nodes manually
-  // Get selection for cursor position
-  const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) {
-    // Fallback: insert as plain text
-    // eslint-disable-next-line deprecation/deprecation
-    document.execCommand("insertText", false, textToInsert)
-    return
-  }
-
-  const range = sel.getRangeAt(0)
-  range.collapse(true)
-
-  // Reset regex for iteration
-  regex.lastIndex = 0
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = regex.exec(textToInsert)) !== null) {
-    // Insert text before this mention
-    if (match.index > lastIndex) {
-      const textBefore = textToInsert.slice(lastIndex, match.index)
-      const textNode = document.createTextNode(textBefore)
-      range.insertNode(textNode)
-      range.setStartAfter(textNode)
-      range.collapse(true)
-    }
-
-    // Parse and insert mention
-    const id = match[1]
-    const option = parseMentionId(id)
-
-    if (option) {
-      const mentionNode = createMentionNode(option)
-      range.insertNode(mentionNode)
-      range.setStartAfter(mentionNode)
-      range.collapse(true)
-
-      // Add space after mention
-      const spaceNode = document.createTextNode(" ")
-      range.insertNode(spaceNode)
-      range.setStartAfter(spaceNode)
-      range.collapse(true)
-    } else {
-      // Unknown mention format - insert as text
-      const mentionText = document.createTextNode(`@[${id}]`)
-      range.insertNode(mentionText)
-      range.setStartAfter(mentionText)
-      range.collapse(true)
-    }
-
-    lastIndex = match.index + match[0].length
-  }
-
-  // Insert remaining text after last mention
-  if (lastIndex < textToInsert.length) {
-    const textAfter = textToInsert.slice(lastIndex)
-    const textNode = document.createTextNode(textAfter)
-    range.insertNode(textNode)
-    range.setStartAfter(textNode)
-    range.collapse(true)
-  }
-
-  // Update selection
-  sel.removeAllRanges()
-  sel.addRange(range)
+  // Insert using execCommand to preserve undo history
+  // execCommand is deprecated but it's the only way to properly integrate with
+  // the browser's undo stack in contenteditable elements
+  // eslint-disable-next-line deprecation/deprecation
+  document.execCommand("insertText", false, textToInsert)
 }
 
 /**
