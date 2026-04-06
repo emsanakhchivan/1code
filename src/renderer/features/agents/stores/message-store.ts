@@ -3,6 +3,7 @@
 import { atom } from "jotai"
 import { atomFamily } from "jotai/utils"
 import { appStore } from "../../../lib/jotai-store"
+import { agentChatStore } from "./agent-chat-store"
 
 // Types
 export interface MessagePart {
@@ -80,6 +81,13 @@ export function evictLeastRecentlyUsed(currentSubChatId: string, protectedIds: s
     .slice(0, keys.length - MAX_ACTIVE_CHATS)
 
   for (const subChatId of toEvict) {
+    // CRITICAL: First abort any active stream via transport.cleanup()
+    // agentChatStore.delete() calls chat?.transport?.cleanup?.() which:
+    // 1. Aborts active fetch requests
+    // 2. Cleans up event listeners
+    // 3. Prevents orphaned streams from writing to deleted caches
+    agentChatStore.delete(subChatId)
+    // Then clear Jotai atom caches
     clearSubChatCaches(subChatId)
     lastAccessTimeByChat.delete(subChatId)
   }
@@ -906,7 +914,13 @@ export const syncMessagesWithStatusAtom = atom(
       if (hasMessageChanged(currentSubChatId, lastMsg.id, lastMsg) || !currentAtomValue) {
         const clonedMsg = {
           ...lastMsg,
-          parts: lastMsg.parts?.map((part: any) => ({ ...part, input: part.input ? { ...part.input } : undefined })),
+          parts: lastMsg.parts?.map((part: any) => ({
+            ...part,
+            input: part.input ? { ...part.input } : undefined,
+            output: part.output ? { ...part.output } : undefined,
+            result: part.result ? { ...part.result } : undefined,
+            error: part.error ? { ...part.error } : undefined,
+          })),
         }
         set(messageAtomFamily(messageKey), clonedMsg)
       }
@@ -932,7 +946,13 @@ export const syncMessagesWithStatusAtom = atom(
           if (!existing) {
             set(messageAtomFamily(key), {
               ...msg,
-              parts: msg.parts?.map((part: any) => ({ ...part, input: part.input ? { ...part.input } : undefined })),
+              parts: msg.parts?.map((part: any) => ({
+                ...part,
+                input: part.input ? { ...part.input } : undefined,
+                output: part.output ? { ...part.output } : undefined,
+                result: part.result ? { ...part.result } : undefined,
+                error: part.error ? { ...part.error } : undefined,
+              })),
             })
           }
         }
@@ -1051,9 +1071,17 @@ export const syncMessagesWithStatusAtom = atom(
       // of the current streaming assistant message without changing the last part.
       if (msgChanged || !currentAtomValue || isLastMessage) {
         // Deep clone message with new parts array and new part objects
+        // CRITICAL: AI SDK mutates output/result/error in-place during streaming,
+        // so we must clone these fields for Jotai to detect changes via Object.is()
         const clonedMsg = {
           ...msg,
-          parts: msg.parts?.map((part: any) => ({ ...part, input: part.input ? { ...part.input } : undefined })),
+          parts: msg.parts?.map((part: any) => ({
+            ...part,
+            input: part.input ? { ...part.input } : undefined,
+            output: part.output ? { ...part.output } : undefined,
+            result: part.result ? { ...part.result } : undefined,
+            error: part.error ? { ...part.error } : undefined,
+          })),
         }
         set(messageAtomFamily(messageKey), clonedMsg)
       }
