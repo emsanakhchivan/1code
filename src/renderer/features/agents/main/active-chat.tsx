@@ -2293,7 +2293,10 @@ const ChatViewInner = memo(function ChatViewInner({
         if (useStreamingStatusStore.getState().isStreaming(subChatId)) return
         if ((useMessageQueueStore.getState().queues[subChatId]?.length ?? 0) > 0) return
 
-        clearRuntimeCachesForSubChat(subChatId)
+        // NOTE: We do NOT clear Jotai atoms here anymore.
+        // The atoms contain messages that should be visible when user returns to this chat.
+        // Only clear scroll position cache (not messages).
+        scrollPositionCache.delete(subChatId)
       }, 100)
 
       pendingSubChatCleanupTimers.set(subChatId, timeoutId)
@@ -4479,9 +4482,39 @@ const ChatViewInner = memo(function ChatViewInner({
   // Only active pane updates legacy global atoms to avoid cross-pane races/churn.
   const syncMessages = useSetAtom(syncMessagesWithStatusAtom)
 
+  // Track previous streaming state to detect transition (streaming → ready)
+  // This is critical: when streaming finishes while tab is hidden, we MUST sync
+  // the final messages to atoms, otherwise the UI shows empty messages.
+  // Note: Using separate ref from the one at line ~2797 which is for question clearing.
+  const prevIsStreamingForSyncRef = useRef(isStreaming)
+  const streamingJustFinished = prevIsStreamingForSyncRef.current && !isStreaming
+  prevIsStreamingForSyncRef.current = isStreaming
+
+  // Track if we've done at least one sync for this specific subChatId
+  // Key: subChatId changes when user switches between sub-chats in keep-alive tabs
+  // Each new subChatId needs its own initial sync to populate atoms
+  const lastSyncedSubChatIdRef = useRef<string | null>(null)
+  const needsInitialSync = lastSyncedSubChatIdRef.current !== subChatId
+
   useLayoutEffect(() => {
+    // CRITICAL FIX: Always sync when:
+    // 1. Tab is active (user is viewing it)
+    // 2. Streaming just finished (need to capture final state)
+    // 3. It's a split pane (both panes need to stay in sync)
+    // 4. First sync for this subChatId (ensure atoms are populated)
+    //
+    // Only skip sync for truly idle hidden tabs (no streaming activity)
+    // that have already been synced at least once for this specific subChatId.
+    // The previous optimization caused a bug where messages wouldn't appear
+    // when returning to a tab after streaming finished in background.
+    const isKeepAliveHidden = !isActive && !isSplitPane
+    const isIdleHidden = isKeepAliveHidden && !isStreaming && !streamingJustFinished && !needsInitialSync
+
+    if (isIdleHidden) return
+
     syncMessages({ messages, status, subChatId, updateGlobal: isActive })
-  }, [messages, status, subChatId, isActive, isSplitPane, syncMessages])
+    lastSyncedSubChatIdRef.current = subChatId
+  }, [messages, status, subChatId, isActive, isSplitPane, isStreaming, streamingJustFinished, syncMessages])
 
   // Sync status to global streaming status store for queue processing
   const setStreamingStatus = useStreamingStatusStore((s) => s.setStatus)
@@ -5541,6 +5574,8 @@ export function ChatView({
 
   // Prune chat instances from previous workspace when switching parent chat.
   // Prevents cross-workspace memory accumulation.
+  // NOTE: We only delete Chat instances from agentChatStore, NOT the Jotai atoms.
+  // The atoms contain messages that should be visible when user returns to this workspace.
   const previousParentChatIdRef = useRef<string | null>(chatId)
   useEffect(() => {
     const previousParentChatId = previousParentChatIdRef.current
@@ -5549,8 +5584,9 @@ export function ChatView({
         if (agentChatStore.getParentChatId(subChatId) !== previousParentChatId) continue
         if (useStreamingStatusStore.getState().isStreaming(subChatId)) continue
         if ((useMessageQueueStore.getState().queues[subChatId]?.length ?? 0) > 0) continue
+        // Only delete the Chat instance, NOT the Jotai atoms (messages)
         agentChatStore.delete(subChatId)
-        clearRuntimeCachesForSubChat(subChatId)
+        // DO NOT call clearRuntimeCachesForSubChat - it clears Jotai atoms!
       }
     }
     previousParentChatIdRef.current = chatId
@@ -5558,6 +5594,7 @@ export function ChatView({
 
   // Bound resident chat instances in memory for current workspace.
   // Keep mounted tabs and currently streaming chats; evict everything else.
+  // NOTE: We only delete Chat instances from agentChatStore, NOT the Jotai atoms.
   useEffect(() => {
     if (chatSourceMode !== "local") return
     if (!activeSubChatId) return
@@ -5571,8 +5608,9 @@ export function ChatView({
       if (useStreamingStatusStore.getState().isStreaming(subChatId)) continue
       if ((useMessageQueueStore.getState().queues[subChatId]?.length ?? 0) > 0) continue
 
+      // Only delete the Chat instance, NOT the Jotai atoms (messages)
       agentChatStore.delete(subChatId)
-      clearRuntimeCachesForSubChat(subChatId)
+      // DO NOT call clearRuntimeCachesForSubChat - it clears Jotai atoms!
     }
   }, [activeSubChatId, chatId, chatSourceMode, tabsToRender])
 
@@ -6572,15 +6610,20 @@ Make sure to preserve all functionality from both branches when resolving confli
   )
 
   // If a stream finishes after user already switched to another workspace,
-  // eagerly evict this runtime chat once it's idle to avoid permanent retention.
+  // eagerly evict this runtime chat instance to avoid permanent retention.
+  // NOTE: We only delete the Chat instance from agentChatStore, NOT the Jotai atoms.
+  // The atoms contain the messages that should be visible when user returns to this chat.
+  // Clearing atoms would cause the "empty messages on return" bug.
   const pruneIfDetachedAndIdle = useCallback((subChatId: string, parentChatId: string) => {
     const currentSelectedChatId = appStore.get(selectedAgentChatIdAtom)
     if (!currentSelectedChatId || currentSelectedChatId === parentChatId) return
     if (useStreamingStatusStore.getState().isStreaming(subChatId)) return
     if ((useMessageQueueStore.getState().queues[subChatId]?.length ?? 0) > 0) return
 
+    // Only delete the Chat instance, NOT the Jotai atoms (messages)
+    // The atoms are needed for rendering when user returns to this workspace
     agentChatStore.delete(subChatId)
-    clearRuntimeCachesForSubChat(subChatId)
+    // DO NOT call clearRuntimeCachesForSubChat - it clears Jotai atoms!
   }, [])
 
   // Create or get Chat instance for a sub-chat
@@ -6816,6 +6859,11 @@ Make sure to preserve all functionality from both branches when resolving confli
 
           // Refresh diff stats after agent finishes making changes
           fetchDiffStatsRef.current()
+
+          // Invalidate file stats query so sidebar stats update immediately
+          // This ensures the +X/-Y indicators show correct values after tool execution
+          getQueryClient()?.invalidateQueries({ queryKey: [['chats', 'getFileStats']] })
+          getQueryClient()?.invalidateQueries({ queryKey: [['chats', 'getPendingPlanApprovals']] })
 
           pruneIfDetachedAndIdle(subChatId, chatId)
 
@@ -7137,6 +7185,11 @@ Make sure to preserve all functionality from both branches when resolving confli
 
           // Refresh diff stats after agent finishes making changes
           fetchDiffStatsRef.current()
+
+          // Invalidate file stats query so sidebar stats update immediately
+          // This ensures the +X/-Y indicators show correct values after tool execution
+          getQueryClient()?.invalidateQueries({ queryKey: [['chats', 'getFileStats']] })
+          getQueryClient()?.invalidateQueries({ queryKey: [['chats', 'getPendingPlanApprovals']] })
 
           pruneIfDetachedAndIdle(newId, chatId)
 

@@ -175,13 +175,13 @@ export function KanbanView() {
   // Pending plan approvals from DB
   const { data: pendingPlanApprovalsData } = trpc.chats.getPendingPlanApprovals.useQuery(
     { openSubChatIds: allOpenSubChatIds },
-    { refetchInterval: 5000, enabled: allOpenSubChatIds.length > 0, placeholderData: (prev) => prev }
+    { staleTime: 30_000, refetchOnWindowFocus: false, enabled: allOpenSubChatIds.length > 0, placeholderData: (prev) => prev }
   )
 
   // File stats from DB
   const { data: fileStatsData } = trpc.chats.getFileStats.useQuery(
     { openSubChatIds: allOpenSubChatIds },
-    { refetchInterval: 5000, enabled: allOpenSubChatIds.length > 0, placeholderData: (prev) => prev }
+    { staleTime: 30_000, refetchOnWindowFocus: false, enabled: allOpenSubChatIds.length > 0, placeholderData: (prev) => prev }
   )
 
   // Build set of chatIds with pending plan approvals from DB

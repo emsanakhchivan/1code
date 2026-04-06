@@ -9,6 +9,11 @@ import {
   pendingUserQuestionsAtom,
 } from "../atoms"
 import {
+  touchChatAccess,
+  evictLeastRecentlyUsed,
+} from "../stores/message-store"
+import { useStreamingStatusStore } from "../stores/streaming-status-store"
+import {
   widgetVisibilityAtomFamily,
   unifiedSidebarEnabledAtom,
 } from "../../details-sidebar/atoms"
@@ -624,6 +629,25 @@ export function SubChatSelector({
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [checkScrollPosition])
+
+  // LRU Cache Eviction - Evict old caches when switching chats
+  useEffect(() => {
+    if (!activeSubChatId) return
+
+    // Track access time
+    touchChatAccess(activeSubChatId)
+
+    // Get protected IDs: split pane + streaming chats
+    const streamingStatuses = useStreamingStatusStore.getState().statuses
+    const streamingIds = Object.entries(streamingStatuses)
+      .filter(([, status]) => status === "streaming" || status === "submitted")
+      .map(([id]) => id)
+
+    const protectedIds = [...splitPaneIds, ...streamingIds]
+
+    // Evict least recently used caches
+    evictLeastRecentlyUsed(activeSubChatId, protectedIds)
+  }, [activeSubChatId, splitPaneIds])
 
   // Cleanup refs for closed tabs to prevent memory leaks
   useEffect(() => {

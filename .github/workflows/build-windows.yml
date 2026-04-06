@@ -39,10 +39,19 @@ jobs:
       - name: Package Windows (NSIS + portable)
         run: bun run package:win
 
+      - name: Get version
+        id: version
+        run: |
+          $version = node -p "require('./package.json').version"
+          $product = node -p "require('./package.json').productName"
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "PRODUCT=$product" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
+          name: ${{ steps.version.outputs.PRODUCT }}-${{ steps.version.outputs.VERSION }}-windows
           path: |
             release/*.exe
             release/*.exe.blockmap

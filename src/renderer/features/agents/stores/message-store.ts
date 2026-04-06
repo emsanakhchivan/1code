@@ -57,6 +57,34 @@ export const messageAtomFamily = atomFamily((_messageKey: string) =>
 // Track active message IDs per subChat for cleanup
 const activeMessageIdsByChat = new Map<string, Set<string>>()
 
+// LRU Cache Eviction - Track access times and evict oldest when limit exceeded
+const MAX_ACTIVE_CHATS = 20
+const lastAccessTimeByChat = new Map<string, number>()
+
+// Track chat access time for LRU eviction
+export function touchChatAccess(subChatId: string) {
+  lastAccessTimeByChat.set(subChatId, Date.now())
+}
+
+// Evict least recently used caches, protecting active/split/streaming chats
+export function evictLeastRecentlyUsed(currentSubChatId: string, protectedIds: string[] = []) {
+  const keys = Array.from(activeMessageIdsByChat.keys())
+  const keepSet = new Set([currentSubChatId, ...protectedIds])
+
+  if (keys.length <= MAX_ACTIVE_CHATS) return
+
+  // Sort by last access time (oldest first)
+  const toEvict = keys
+    .filter(k => !keepSet.has(k))
+    .sort((a, b) => (lastAccessTimeByChat.get(a) || 0) - (lastAccessTimeByChat.get(b) || 0))
+    .slice(0, keys.length - MAX_ACTIVE_CHATS)
+
+  for (const subChatId of toEvict) {
+    clearSubChatCaches(subChatId)
+    lastAccessTimeByChat.delete(subChatId)
+  }
+}
+
 // Ordered list of message IDs (for rendering order)
 export const messageIdsAtom = atom<string[]>([])
 
@@ -842,6 +870,11 @@ function hasMessageChanged(subChatId: string, msgId: string, msg: Message): bool
   return changed
 }
 
+// Track synced message count per subChat to enable O(1) diff-only updates.
+// After the initial full sync, only the streaming message (last) changes on each tick.
+// When message count changes, a full sync is triggered to pick up additions/removals.
+const syncProgressByChat = new Map<string, { syncedCount: number }>()
+
 export const syncMessagesWithStatusAtom = atom(
   null,
   (get, set, payload: { messages: Message[]; status: string; subChatId?: string; updateGlobal?: boolean }) => {
@@ -851,7 +884,76 @@ export const syncMessagesWithStatusAtom = atom(
     const currentSubChatId = subChatId ?? prevSubChatId
     let globalIdsChanged = false
     let globalRolesChanged = false
+    const messageCount = messages.length
 
+    // --- Fast path: streaming with unchanged message count ---
+    // After initial sync, only the last message changes (AI SDK mutates in-place
+    // during streaming). If the message count hasn't changed, skip the full loop
+    // and only update the streaming tail.
+    // This changes per-tick complexity from O(N) to O(1) where N = message count.
+    const hasCompletedInitialSync = messageCount > 0
+      && activeMessageIdsByChat.has(currentSubChatId)
+    const progress = syncProgressByChat.get(currentSubChatId) ?? null
+    const isAtSteadyState = hasCompletedInitialSync && progress !== null
+      && progress.syncedCount === messageCount && messageCount > 0
+
+    if (isAtSteadyState) {
+      // Only the last message can change during streaming.
+      const lastMsg = messages[messageCount - 1]!
+      const messageKey = getPerChatMessageKey(currentSubChatId, lastMsg.id)
+      const currentAtomValue = get(messageAtomFamily(messageKey))
+
+      if (hasMessageChanged(currentSubChatId, lastMsg.id, lastMsg) || !currentAtomValue) {
+        const clonedMsg = {
+          ...lastMsg,
+          parts: lastMsg.parts?.map((part: any) => ({ ...part, input: part.input ? { ...part.input } : undefined })),
+        }
+        set(messageAtomFamily(messageKey), clonedMsg)
+      }
+
+      // CRITICAL FIX: Ensure per-chat atoms are populated even in steady-state.
+      // This handles the case where sync was skipped for a hidden tab during
+      // streaming → ready transition, and user returns to find empty messages.
+      const perChatIds = get(messageIdsPerChatAtom(currentSubChatId))
+      if (perChatIds.length === 0 && messageCount > 0) {
+        // Atoms are empty but we have messages - populate them
+        const newIds = messages.map((m) => m.id)
+        const newRoles = new Map<string, "user" | "assistant" | "system">()
+        for (const msg of messages) {
+          newRoles.set(msg.id, msg.role)
+        }
+        set(messageIdsPerChatAtom(currentSubChatId), newIds)
+        set(messageRolesPerChatAtom(currentSubChatId), newRoles)
+
+        // Also populate individual message atoms for all messages
+        for (const msg of messages) {
+          const key = getPerChatMessageKey(currentSubChatId, msg.id)
+          const existing = get(messageAtomFamily(key))
+          if (!existing) {
+            set(messageAtomFamily(key), {
+              ...msg,
+              parts: msg.parts?.map((part: any) => ({ ...part, input: part.input ? { ...part.input } : undefined })),
+            })
+          }
+        }
+
+        // CRITICAL: Also update tracking maps so subsequent fast-path checks work correctly
+        activeMessageIdsByChat.set(currentSubChatId, new Set(newIds))
+        syncProgressByChat.set(currentSubChatId, { syncedCount: messageCount })
+      }
+
+      // Global streaming state
+      if (updateGlobal) {
+        if (status === "streaming" || status === "submitted") {
+          set(streamingMessageIdAtom, lastMsg.id)
+        } else {
+          set(streamingMessageIdAtom, null)
+        }
+      }
+      return
+    }
+
+    // --- Full sync path: initial load, new message added/removed, or recovery ---
     if (updateGlobal) {
       // Update current subChatId if provided AND changed
       // Avoid unnecessary set() calls - even though Jotai won't re-render for same primitive,
@@ -868,7 +970,7 @@ export const syncMessagesWithStatusAtom = atom(
     }
 
     // Build new IDs list and roles map
-    const newIds = messages.map((m) => m.id)
+    const newIds = messageCount === 0 ? [] : messages.map((m) => m.id)
     const newRoles = new Map<string, "user" | "assistant" | "system">()
 
     for (const msg of messages) {
@@ -974,8 +1076,9 @@ export const syncMessagesWithStatusAtom = atom(
       }
     }
 
-    // Update active IDs tracking
+    // Update active IDs tracking and sync progress
     activeMessageIdsByChat.set(currentSubChatId, newIdsSet)
+    syncProgressByChat.set(currentSubChatId, { syncedCount: messageCount })
 
     // Legacy global streaming state: update only for active pane.
     if (updateGlobal) {
@@ -1051,8 +1154,33 @@ export function clearSubChatCaches(subChatId: string): {
     activeMessageIdsByChat.delete(subChatId)
   }
 
+  // Clean up per-chat atomFamily entries (writable primitive atoms that hold actual values)
+  messageIdsPerChatAtom.remove(subChatId)
+  messageRolesPerChatAtom.remove(subChatId)
+
+  // Clean up messageId-based atomFamily entries for messages in this subChat
+  if (activeIds) {
+    for (const id of activeIds) {
+      isLastMessageAtomFamily.remove(id)
+      isMessageStreamingAtomFamily.remove(id)
+    }
+  }
+
+  // Clean up user-message-specific atomFamily entries
+  const userMsgIds = userMessageIdsCacheByChat.get(subChatId)
+  if (userMsgIds) {
+    for (const userMsgId of userMsgIds) {
+      isLastUserMessageAtomFamily.remove(userMsgId)
+      isFirstUserMessageAtomFamily.remove(userMsgId)
+      rollbackTargetSdkUuidForUserMsgAtomFamily.remove(userMsgId)
+    }
+    userMessageIdsCacheByChat.delete(subChatId)
+  }
+
+  // Clean up sync progress tracking
+  syncProgressByChat.delete(subChatId)
+
   // Clear other caches
-  userMessageIdsCacheByChat.delete(subChatId)
   userMessageIdsPerChatCache.delete(subChatId)
   messageGroupsCacheByChat.delete(subChatId)
   messageGroupsPerChatCache.delete(subChatId)
