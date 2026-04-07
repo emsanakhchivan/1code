@@ -2468,7 +2468,7 @@ const ChatViewInner = memo(function ChatViewInner({
     id: subChatId,
     chat,
     resume: !!streamId,
-    experimental_throttle: 50,  // Throttle updates to reduce re-renders during streaming
+    experimental_throttle: 100,  // Throttle updates to reduce re-renders during streaming (100ms = 10 updates/sec)
   })
 
   // Refs for useChat functions to keep callbacks stable across renders
@@ -4496,7 +4496,10 @@ const ChatViewInner = memo(function ChatViewInner({
   const lastSyncedSubChatIdRef = useRef<string | null>(null)
   const needsInitialSync = lastSyncedSubChatIdRef.current !== subChatId
 
-  useLayoutEffect(() => {
+  // NOTE: Using useEffect instead of useLayoutEffect to prevent main thread blocking
+  // during high-frequency streaming updates. syncMessages does heavy work (deep clone,
+  // atom updates) which should be async to avoid UI freezing.
+  useEffect(() => {
     // CRITICAL FIX: Always sync when:
     // 1. Tab is active (user is viewing it)
     // 2. Streaming just finished (need to capture final state)

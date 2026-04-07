@@ -57,7 +57,8 @@ if (IS_DEV) {
 
 // Increase V8 old-space limit for renderer/main processes to reduce OOM frequency
 // under heavy multi-chat workloads. Must be set before app readiness/window creation.
-app.commandLine.appendSwitch("js-flags", "--max-old-space-size=8192")
+// 16 GB limit for systems with 32+ GB RAM, allows many workspaces without crashes.
+app.commandLine.appendSwitch("js-flags", "--max-old-space-size=16384")
 
 // GPU acceleration setting - MUST be set before app is ready
 // Default: DISABLED for stability (GPU crashes with many workspaces)

@@ -863,6 +863,81 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
     },
   )
 
+  // ============================================================================
+  // RENDERER CRASH PROTECTION - Handle renderer process crashes and hangs
+  // ============================================================================
+
+  // Track if we've already shown a crash notification (prevent spam)
+  let crashNotificationShown = false
+
+  // Handle renderer process crash (GPU crash, OOM, V8 error, etc.)
+  window.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[Main] Renderer process gone in window", window.id, ":", details)
+
+    // Log the crash reason for debugging
+    const crashReason = details.reason || "unknown"
+    const exitCode = details.exitCode ?? -1
+    console.error(`[Main] Crash reason: ${crashReason}, exit code: ${exitCode}`)
+
+    // Don't spam notifications if multiple crashes happen quickly
+    if (crashNotificationShown) return
+    crashNotificationShown = true
+
+    // Reset the flag after 10 seconds
+    setTimeout(() => {
+      crashNotificationShown = false
+    }, 10000)
+
+    // Show notification about the crash
+    try {
+      const notification = new Notification({
+        title: "1Code Renderer Crashed",
+        body: `Reason: ${crashReason}. Your agents are still running. Click to reload.`,
+        ...(process.platform !== "darwin" && {
+          icon: nativeImage.createFromPath(join(__dirname, "../../build/icon.ico")),
+        }),
+      })
+
+      notification.on("click", () => {
+        // Reload the window on notification click
+        if (!window.isDestroyed()) {
+          window.reload()
+        }
+      })
+
+      notification.show()
+    } catch (error) {
+      console.error("[Main] Failed to show crash notification:", error)
+    }
+  })
+
+  // Handle unresponsive renderer (main thread blocked, infinite loop, etc.)
+  window.on("unresponsive", () => {
+    console.warn("[Main] Renderer unresponsive in window", window.id)
+
+    // Give it 5 seconds to recover before showing notification
+    setTimeout(() => {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+        try {
+          new Notification({
+            title: "1Code is not responding",
+            body: "The renderer may be overloaded. Your agents are still running.",
+            ...(process.platform !== "darwin" && {
+              icon: nativeImage.createFromPath(join(__dirname, "../../build/icon.ico")),
+            }),
+          }).show()
+        } catch {
+          // Ignore notification errors
+        }
+      }
+    }, 5000)
+  })
+
+  // Handle renderer becoming responsive again
+  window.on("responsive", () => {
+    console.log("[Main] Renderer responsive again in window", window.id)
+  })
+
   return window
 }
 
