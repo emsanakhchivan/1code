@@ -61,14 +61,14 @@ if (IS_DEV) {
 app.commandLine.appendSwitch("js-flags", "--max-old-space-size=16384")
 
 // GPU acceleration setting - MUST be set before app is ready
-// Default: DISABLED for stability (GPU crashes with many workspaces)
-// User can enable in Settings > Preferences (requires restart)
+// Default: ENABLED for better performance and battery life
+// User can disable in Settings > Preferences if experiencing GPU driver issues (requires restart)
 const gpuAccelerationEnabled = getGpuAccelerationEnabled()
 if (!gpuAccelerationEnabled) {
   app.disableHardwareAcceleration()
-  console.log("[App] GPU hardware acceleration disabled (default for stability)")
+  console.log("[App] GPU hardware acceleration disabled (user preference)")
 } else {
-  console.log("[App] GPU hardware acceleration enabled (user preference)")
+  console.log("[App] GPU hardware acceleration enabled (default for performance)")
 }
 
 // Initialize Sentry before app is ready (production only)

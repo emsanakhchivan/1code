@@ -13,8 +13,8 @@ const SETTINGS_FILE_NAME = "app-settings.json"
 interface AppSettings {
   /**
    * GPU hardware acceleration
-   * - false (default): GPU acceleration disabled, more stable on systems with many workspaces
-   * - true: GPU acceleration enabled, may cause GPU crashes with many workspaces
+   * - true (default): GPU acceleration enabled, better performance and battery life
+   * - false: GPU acceleration disabled, may help on systems with GPU driver issues
    *
    * Changing this setting requires app restart to take effect
    */
@@ -22,7 +22,7 @@ interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  gpuAccelerationEnabled: false, // Default OFF for stability
+  gpuAccelerationEnabled: true, // Default ON for better performance (CPU rendering consumes more battery)
 }
 
 /**

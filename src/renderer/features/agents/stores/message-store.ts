@@ -65,6 +65,15 @@ const lastAccessTimeByChat = new Map<string, number>()
 // Track chat access time for LRU eviction
 export function touchChatAccess(subChatId: string) {
   lastAccessTimeByChat.set(subChatId, Date.now())
+
+  // Memory leak verification: warn and auto-evict if exceeding threshold
+  const activeChatCount = activeMessageIdsByChat.size
+  if (activeChatCount > MAX_ACTIVE_CHATS + 10) {
+    console.warn(
+      `[MessageStore] Memory threshold exceeded: ${activeChatCount} active chats (limit: ${MAX_ACTIVE_CHATS}). Auto-evicting...`
+    )
+    evictLeastRecentlyUsed(subChatId)
+  }
 }
 
 // Evict least recently used caches, protecting active/split/streaming chats

@@ -209,9 +209,14 @@ class GitWatcherRegistry {
 	async getOrCreate(worktreePath: string): Promise<GitWatcher> {
 		let watcher = this.watchers.get(worktreePath);
 		if (!watcher) {
+			// Dynamic debounce: increase with more worktrees to reduce IPC flood
+			// 100ms for <50 worktrees, 250ms for 50-100, 500ms for >100
+			const watcherCount = this.watchers.size;
+			const debounceMs = watcherCount < 50 ? 100 : watcherCount < 100 ? 250 : 500;
+
 			watcher = new GitWatcher({
 				worktreePath,
-				debounceMs: 100,
+				debounceMs,
 			});
 			this.watchers.set(worktreePath, watcher);
 
