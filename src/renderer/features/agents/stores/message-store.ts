@@ -4,6 +4,7 @@ import { atom } from "jotai"
 import { atomFamily } from "jotai/utils"
 import { appStore } from "../../../lib/jotai-store"
 import { agentChatStore } from "./agent-chat-store"
+import { clearSubChatAtoms } from "../atoms"
 
 // Types
 export interface MessagePart {
@@ -1224,6 +1225,9 @@ export function clearSubChatCaches(subChatId: string): {
   lastAssistantCacheByChat.delete(subChatId)
   tokenDataCacheByChat.delete(subChatId)
 
+  // CRITICAL: Clear atomFamily entries from atoms/index.ts to prevent memory leaks
+  clearSubChatAtoms(subChatId)
+
   return {
     messageIds: clearedMessageIds,
     toolCallIds: Array.from(clearedToolCallIds),
@@ -1235,6 +1239,18 @@ export function clearAllCaches() {
   for (const subChatId of activeMessageIdsByChat.keys()) {
     clearSubChatCaches(subChatId)
   }
+
+  // Clear remaining module-level Maps that may have orphaned entries
+  previousMessageState.clear()
+  lastAccessTimeByChat.clear()
+  assistantIdsCacheByChat.clear()
+  assistantIdsPerChatCache.clear()
+  userMessageIdsCacheByChat.clear()
+  userMessageIdsPerChatCache.clear()
+  messageGroupsCacheByChat.clear()
+  messageGroupsPerChatCache.clear()
+  lastAssistantCacheByChat.clear()
+  tokenDataCacheByChat.clear()
 
   const remainingStructureIds = Array.from(messageStructureCache.keys())
   for (const messageId of remainingStructureIds) {

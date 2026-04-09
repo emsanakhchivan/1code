@@ -1238,3 +1238,65 @@ export const fileViewerOpenAtomFamily = atomFamily((chatId: string) =>
     },
   ),
 )
+
+// ============================================================================
+// MEMORY LEAK FIX: Cleanup function for subChat-related atoms
+// ============================================================================
+// Must be called when a subChat is closed/archived to prevent memory leaks
+// from atomFamily entries accumulating indefinitely
+
+export function clearSubChatAtoms(subChatId: string): void {
+  // Remove atomFamily entries (Jotai doesn't auto-GC these)
+  subChatModelIdAtomFamily.remove(subChatId)
+  subChatCodexModelIdAtomFamily.remove(subChatId)
+  subChatCodexThinkingAtomFamily.remove(subChatId)
+  subChatProfileIdAtomFamily.remove(subChatId)
+  subChatCustomModelIdAtomFamily.remove(subChatId)
+  subChatModeAtomFamily.remove(subChatId)
+  currentTodosAtomFamily.remove(subChatId)
+  currentTaskToolsAtomFamily.remove(subChatId)
+  diffFilesCollapsedAtomFamily.remove(subChatId)
+
+  // These use chatId, not subChatId - keep for now
+  // (will be cleaned when parent chat is closed)
+  // previewPathAtomFamily, viewportModeAtomFamily, etc.
+}
+
+// Clear Map-based atoms that hold subChat data (call from store setter)
+export function clearSubChatMapAtoms(
+  get: (atom: any) => any,
+  set: (atom: any, value: any) => void,
+  subChatId: string,
+): void {
+  // Clear subChatFilesAtom
+  const files: Map<string, SubChatFileChange[]> = get(subChatFilesAtom)
+  if (files?.has(subChatId)) {
+    const newFiles = new Map(files)
+    newFiles.delete(subChatId)
+    set(subChatFilesAtom, newFiles)
+  }
+
+  // Clear subChatErrorsAtom
+  const errors: Map<string, SubChatError> = get(subChatErrorsAtom)
+  if (errors?.has(subChatId)) {
+    const newErrors = new Map(errors)
+    newErrors.delete(subChatId)
+    set(subChatErrorsAtom, newErrors)
+  }
+}
+
+export function clearChatAtoms(chatId: string): void {
+  // Remove chat-level atomFamily entries
+  previewPathAtomFamily.remove(chatId)
+  viewportModeAtomFamily.remove(chatId)
+  previewScaleAtomFamily.remove(chatId)
+  mobileDeviceAtomFamily.remove(chatId)
+  diffSidebarOpenAtomFamily.remove(chatId)
+  diffFilesCollapsedAtomFamily.remove(chatId)
+  viewedFilesAtomFamily.remove(chatId)
+  planSidebarOpenAtomFamily.remove(chatId)
+  currentPlanPathAtomFamily.remove(chatId)
+  planEditRefetchTriggerAtomFamily.remove(chatId)
+  workspaceDiffCacheAtomFamily.remove(chatId)
+  fileViewerOpenAtomFamily.remove(chatId)
+}

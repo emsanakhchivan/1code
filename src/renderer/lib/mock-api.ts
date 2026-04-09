@@ -12,6 +12,39 @@ type AnyFn = (...args: any[]) => any
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = Record<string, any>
 
+// Message parse cache - prevents re-parsing same messages across renders
+const messageParseCache = new Map<string, AnyObj[]>()
+const MAX_CACHE_SIZE = 50
+
+/**
+ * Sync message parser with LRU cache for performance
+ * Accepts both JSON string and already-parsed array
+ */
+export function parseMessagesSync(messagesInput: string | AnyObj[] | null): AnyObj[] {
+  if (!messagesInput) return []
+  if (Array.isArray(messagesInput)) return messagesInput
+
+  // Check cache first using content hash
+  const cacheKey = `sync:${messagesInput.length}:${messagesInput.slice(0, 100)}`
+  const cached = messageParseCache.get(cacheKey)
+  if (cached) return cached
+
+  try {
+    const parsedMessages: AnyObj[] = JSON.parse(messagesInput)
+
+    // Cache with size limit
+    if (messageParseCache.size >= MAX_CACHE_SIZE) {
+      const oldestKey = messageParseCache.keys().next().value
+      if (oldestKey) messageParseCache.delete(oldestKey)
+    }
+    messageParseCache.set(cacheKey, parsedMessages)
+
+    return parsedMessages
+  } catch {
+    return []
+  }
+}
+
 export const api = {
   agents: {
     getAgentChats: {

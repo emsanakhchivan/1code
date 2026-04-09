@@ -82,7 +82,7 @@ import { useFileChangeListener, useGitWatcher } from "../../../lib/hooks/use-fil
 import { useRemoteChat } from "../../../lib/hooks/use-remote-chats"
 import { useResolvedHotkeyDisplay } from "../../../lib/hotkeys"
 import { appStore } from "../../../lib/jotai-store"
-import { api } from "../../../lib/mock-api"
+import { api, parseMessagesSync } from "../../../lib/mock-api"
 import { trpc, trpcClient } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
 import { isDesktopApp, isWindows } from "../../../lib/utils/platform"
@@ -6682,18 +6682,10 @@ Make sure to preserve all functionality from both branches when resolving confli
       // Find sub-chat data
       const subChat = agentSubChats.find((sc) => sc.id === subChatId)
       const rawMessages = subChat?.messages
-      const messages = Array.isArray(rawMessages)
-        ? rawMessages
-        : typeof rawMessages === "string"
-          ? (() => {
-              try {
-                const parsed = JSON.parse(rawMessages)
-                return Array.isArray(parsed) ? parsed : []
-              } catch {
-                return []
-              }
-            })()
-          : []
+
+      // Use cached sync parser - handles both JSON string and already-parsed array
+      // Cache prevents redundant JSON.parse on the same messages
+      const messages = parseMessagesSync(rawMessages || null)
 
       // Get mode from store metadata (falls back to currentMode)
       const subChatMeta = useAgentSubChatStore

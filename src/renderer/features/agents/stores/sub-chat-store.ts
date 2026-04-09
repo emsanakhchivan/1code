@@ -5,7 +5,8 @@ import { agentChatStore } from "./agent-chat-store"
 import { getWindowId } from "../../../contexts/WindowContext"
 import { clearTaskSnapshotCache } from "../ui/agent-task-tools"
 import { clearSubChatRuntimeCaches } from "./sub-chat-runtime-cleanup"
-import { getDefaultRatios, addPaneRatio, removePaneRatio } from "../atoms"
+import { getDefaultRatios, addPaneRatio, removePaneRatio, clearSubChatMapAtoms } from "../atoms"
+import { appStore } from "../../../lib/jotai-store"
 
 const MAX_SPLIT_PANES = 4
 
@@ -246,6 +247,9 @@ export const useAgentSubChatStore = create<AgentSubChatStore>((set, get) => ({
     clearSubChatRuntimeCaches(subChatId)
     agentChatStore.delete(subChatId)
     clearTaskSnapshotCache(subChatId)
+
+    // MEMORY LEAK FIX: Clear Map-based Jotai atoms
+    clearSubChatMapAtoms(appStore.get, appStore.set, subChatId)
   },
 
   togglePinSubChat: (subChatId) => {
