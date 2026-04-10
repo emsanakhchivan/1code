@@ -243,7 +243,7 @@ import { TextSelectionPopover } from "../ui/text-selection-popover"
 import { autoRenameAgentChat } from "../utils/auto-rename"
 import { generateCommitToPrMessage, generatePrMessage, generateReviewMessage } from "../utils/pr-message"
 import { ChatInputArea } from "./chat-input-area"
-import { IsolatedMessagesSection } from "./isolated-messages-section"
+import { VirtualizedMessagesSection } from "./virtualized-messages-list"
 const clearSubChatSelectionAtom = atom(null, () => {})
 const isSubChatMultiSelectModeAtom = atom(false)
 const selectedSubChatIdsAtom = atom(new Set<string>())
@@ -4765,10 +4765,10 @@ const ChatViewInner = memo(function ChatViewInner({
           }}
         >
           <div>
-            {/* ISOLATED: Messages rendered via Jotai atom subscription
-                Each component subscribes to specific atoms and only re-renders when those change
-                KEY: Force remount on subChatId change to ensure fresh atom reads after syncMessages */}
-            <IsolatedMessagesSection
+            {/* VIRTUALIZED: Messages rendered via virtualized list
+                Only visible groups are in the DOM, reducing nodes from O(N) to O(viewport)
+                Each group subscribes to specific Jotai atoms for fine-grained updates */}
+            <VirtualizedMessagesSection
               key={subChatId}
               subChatId={subChatId}
               chatId={parentChatId}
@@ -4777,6 +4777,7 @@ const ChatViewInner = memo(function ChatViewInner({
               stickyTopClass={stickyTopClass}
               sandboxSetupError={sandboxSetupError}
               onRetrySetup={onRetrySetup}
+              scrollContainerRef={chatContainerRef}
               UserBubbleComponent={AgentUserMessageBubble}
               ToolCallComponent={AgentToolCall}
               MessageGroupWrapper={MessageGroup}

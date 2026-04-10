@@ -922,16 +922,26 @@ export const syncMessagesWithStatusAtom = atom(
       const currentAtomValue = get(messageAtomFamily(messageKey))
 
       if (hasMessageChanged(currentSubChatId, lastMsg.id, lastMsg) || !currentAtomValue) {
-        const clonedMsg = {
-          ...lastMsg,
-          parts: lastMsg.parts?.map((part: any) => ({
-            ...part,
-            input: part.input ? { ...part.input } : undefined,
-            output: part.output ? { ...part.output } : undefined,
-            result: part.result ? { ...part.result } : undefined,
-            error: part.error ? { ...part.error } : undefined,
-          })),
-        }
+        // OPTIMIZED: Only shallow-clone the message shell + parts array.
+        // For the LAST part (which is the only one that changes during streaming),
+        // deep-clone its mutable fields (input/output/result/error).
+        // For all other parts, reuse existing references — they are stable.
+        // This reduces object allocations from O(Parts) to O(1) per streaming tick.
+        const parts = lastMsg.parts
+        const lastPartIndex = (parts?.length ?? 0) - 1
+        const clonedParts = parts?.map((part: any, i: number) => {
+          if (i !== lastPartIndex) return part // Stable part — reuse reference
+          // Last part changes during streaming — shallow-clone shell + mutable fields
+          const { input, output, result, error, ...rest } = part
+          return {
+            ...rest,
+            ...(input !== undefined ? { input: typeof input === 'object' && input !== null ? { ...input } : input } : {}),
+            ...(output !== undefined ? { output: typeof output === 'object' && output !== null ? { ...output } : output } : {}),
+            ...(result !== undefined ? { result: typeof result === 'object' && result !== null ? { ...result } : result } : {}),
+            ...(error !== undefined ? { error: typeof error === 'object' && error !== null ? { ...error } : error } : {}),
+          }
+        })
+        const clonedMsg = { ...lastMsg, parts: clonedParts }
         set(messageAtomFamily(messageKey), clonedMsg)
       }
 
@@ -954,15 +964,21 @@ export const syncMessagesWithStatusAtom = atom(
           const key = getPerChatMessageKey(currentSubChatId, msg.id)
           const existing = get(messageAtomFamily(key))
           if (!existing) {
+            // Recovery path — only shallow-clone, the data came from AI SDK which may
+            // mutate in-place, but since we're populating from scratch, a simple spread
+            // is sufficient for Jotai to detect the change.
             set(messageAtomFamily(key), {
               ...msg,
-              parts: msg.parts?.map((part: any) => ({
-                ...part,
-                input: part.input ? { ...part.input } : undefined,
-                output: part.output ? { ...part.output } : undefined,
-                result: part.result ? { ...part.result } : undefined,
-                error: part.error ? { ...part.error } : undefined,
-              })),
+              parts: msg.parts?.map((part: any) => {
+                const { input, output, result, error, ...rest } = part
+                return {
+                  ...rest,
+                  ...(input !== undefined ? { input: typeof input === 'object' && input !== null ? { ...input } : input } : {}),
+                  ...(output !== undefined ? { output: typeof output === 'object' && output !== null ? { ...output } : output } : {}),
+                  ...(result !== undefined ? { result: typeof result === 'object' && result !== null ? { ...result } : result } : {}),
+                  ...(error !== undefined ? { error: typeof error === 'object' && error !== null ? { ...error } : error } : {}),
+                }
+              }),
             })
           }
         }
@@ -1065,11 +1081,9 @@ export const syncMessagesWithStatusAtom = atom(
     // This is the key optimization - only changed messages trigger re-renders
     // CRITICAL: AI SDK mutates objects in-place, so we MUST create a new reference
     // for Jotai to detect the change (it uses Object.is() for comparison)
-    // We need to deep clone the message because:
-    // 1. msg object itself is mutated in-place
-    // 2. msg.parts array is mutated in-place
-    // 3. Individual part objects inside parts are mutated in-place
     const lastMessageId = newIds[newIds.length - 1] ?? null
+    const isStreaming = status === "streaming" || status === "submitted"
+
     for (const msg of messages) {
       const messageKey = getPerChatMessageKey(currentSubChatId, msg.id)
       const currentAtomValue = get(messageAtomFamily(messageKey))
@@ -1080,18 +1094,28 @@ export const syncMessagesWithStatusAtom = atom(
       // Always refresh the last message because AI SDK can mutate non-last parts
       // of the current streaming assistant message without changing the last part.
       if (msgChanged || !currentAtomValue || isLastMessage) {
-        // Deep clone message with new parts array and new part objects
-        // CRITICAL: AI SDK mutates output/result/error in-place during streaming,
-        // so we must clone these fields for Jotai to detect changes via Object.is()
+        // OPTIMIZED: Avoid deep-cloning all parts of all messages.
+        // - For non-streaming messages (or non-last during streaming): only shallow-clone
+        //   the message shell + parts array. Individual part references are stable
+        //   because AI SDK only mutates the streaming (last) message.
+        // - For the last/streaming message: shallow-clone each part's shell and only
+        //   deep-clone mutable fields (input/output/result/error) that AI SDK mutates.
+        // This reduces allocations from O(Messages × Parts) to O(Parts_of_last_msg).
+        const isActivelyStreaming = isStreaming && isLastMessage
         const clonedMsg = {
           ...msg,
-          parts: msg.parts?.map((part: any) => ({
-            ...part,
-            input: part.input ? { ...part.input } : undefined,
-            output: part.output ? { ...part.output } : undefined,
-            result: part.result ? { ...part.result } : undefined,
-            error: part.error ? { ...part.error } : undefined,
-          })),
+          parts: msg.parts?.map((part: any) => {
+            if (!isActivelyStreaming && !msgChanged) return part // Unchanged non-streaming — reuse
+            // Part may have changed — shallow-clone shell + mutable fields
+            const { input, output, result, error, ...rest } = part
+            return {
+              ...rest,
+              ...(input !== undefined ? { input: typeof input === 'object' && input !== null ? { ...input } : input } : {}),
+              ...(output !== undefined ? { output: typeof output === 'object' && output !== null ? { ...output } : output } : {}),
+              ...(result !== undefined ? { result: typeof result === 'object' && result !== null ? { ...result } : result } : {}),
+              ...(error !== undefined ? { error: typeof error === 'object' && error !== null ? { ...error } : error } : {}),
+            }
+          }),
         }
         set(messageAtomFamily(messageKey), clonedMsg)
       }
