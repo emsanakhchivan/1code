@@ -60,11 +60,34 @@
     "./types": {
       "types": "./src/types/index.ts",
       "default": "./src/types/index.ts"
+    },
+    "./types/chat": {
+      "types": "./src/types/chat.ts",
+      "default": "./src/types/chat.ts"
+    },
+    "./types/ui-message": {
+      "types": "./src/types/ui-message.ts",
+      "default": "./src/types/ui-message.ts"
+    },
+    "./types/git": {
+      "types": "./src/types/git.ts",
+      "default": "./src/types/git.ts"
+    },
+    "./types/provider": {
+      "types": "./src/types/provider.ts",
+      "default": "./src/types/provider.ts"
     }
   },
   "dependencies": {
-    "drizzle-orm": "^0.36.0",
+    "drizzle-orm": "^0.36.0"
+  },
+  "peerDependencies": {
     "better-sqlite3": "^11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "typescript": "^5.4.5"
