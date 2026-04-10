@@ -2161,7 +2161,6 @@ export const chatsRouter = router({
       subChatId: z.string().optional(), // If provided, return stats for only this sub-chat
     }))
     .query(({ input }) => {
-      console.log("[getChatStats] Called with:", { chatId: input.chatId, subChatId: input.subChatId })
       const db = getDatabase()
 
       let chatSubChats
@@ -2272,7 +2271,6 @@ export const chatsRouter = router({
         _debugFirstAssistantMetadata: firstAssistantMetadata,
       }
 
-      console.log("[getChatStats] Returning:", result)
       return result
     }),
 })

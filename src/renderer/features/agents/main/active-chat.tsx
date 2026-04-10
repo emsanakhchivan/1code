@@ -3295,8 +3295,9 @@ const ChatViewInner = memo(function ChatViewInner({
         return
       }
 
+      const currentMessages = messagesRef.current
       // Find the index of this user message
-      const userMsgIndex = messages.findIndex((m) => m.id === userMsg.id)
+      const userMsgIndex = currentMessages.findIndex((m) => m.id === userMsg.id)
       if (userMsgIndex === -1) {
         toast.error("Cannot rollback: message not found")
         return
@@ -3304,8 +3305,8 @@ const ChatViewInner = memo(function ChatViewInner({
 
       const sdkUuid = findRollbackTargetSdkUuidForUserIndex(
         userMsgIndex,
-        messages.length,
-        (index) => messages[index] as any,
+        currentMessages.length,
+        (index) => currentMessages[index] as any,
       )
 
       if (!sdkUuid) {
@@ -3465,7 +3466,6 @@ const ChatViewInner = memo(function ChatViewInner({
     [
       isRollingBack,
       isStreaming,
-      messages,
       setMessages,
       subChatId,
       recomputeChangedFiles,
@@ -3771,29 +3771,10 @@ const ChatViewInner = memo(function ChatViewInner({
   }, [handleScroll])
 
   // Auto scroll to bottom when messages change during streaming
-  // Only kicks in after content fills the viewport (overflow behavior)
-  useEffect(() => {
-    // Skip if not active (keep-alive: don't scroll hidden tabs)
-    if (!isVisiblePane) return
-    // Skip if scroll not yet initialized
-    if (!scrollInitializedRef.current) return
-
-    // Auto-scroll during streaming if user hasn't scrolled up
-    if (shouldAutoScrollRef.current && status === "streaming") {
-      const container = chatContainerRef.current
-      if (container) {
-        // Always scroll during streaming if auto-scroll is enabled
-        // (user can disable by scrolling up)
-        requestAnimationFrame(() => {
-          isAutoScrollingRef.current = true
-          container.scrollTop = container.scrollHeight
-          requestAnimationFrame(() => {
-            isAutoScrollingRef.current = false
-          })
-        })
-      }
-    }
-  }, [isVisiblePane, messages, status, subChatId])
+  // NOTE: The ResizeObserver above handles scroll during streaming as content grows.
+  // This effect is only needed as a fallback for edge cases (e.g., messages change
+  // without a content height change, like status updates).
+  // Removed: Previously this ran on every messages change, duplicating ResizeObserver work.
 
   // Scroll to bottom when QueueProcessor auto-sends a queued message.
   // QueueProcessor runs globally and can't access scroll refs, so it
@@ -3832,6 +3813,8 @@ const ChatViewInner = memo(function ChatViewInner({
   // Refs for handleSend to avoid recreating callback on every messages change
   const messagesLengthRef = useRef(messages.length)
   messagesLengthRef.current = messages.length
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
   const subChatModeRef = useRef(subChatMode)
   subChatModeRef.current = subChatMode
   const imagesRef = useRef(images)

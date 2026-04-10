@@ -157,16 +157,25 @@ function decryptToken(encrypted: string): string {
   return safeStorage.decryptString(buffer)
 }
 
+// Cache for Claude Code token to avoid keychain decryption on every streaming message
+let cachedClaudeCodeToken: string | null | undefined = undefined
+let cachedClaudeCodeTokenTs = 0
+const TOKEN_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
 /**
  * Get Claude Code OAuth token from local SQLite
  * Uses multi-account system first (active account), falls back to legacy table
  * Returns null if not connected
+ * Cached for 5 minutes to avoid repeated keychain decryption
  */
 function getClaudeCodeToken(): string | null {
+  // Return cached token if still valid
+  if (cachedClaudeCodeToken !== undefined && Date.now() - cachedClaudeCodeTokenTs < TOKEN_CACHE_TTL) {
+    return cachedClaudeCodeToken
+  }
+
   try {
     const db = getDatabase()
-
-    console.log("[claude-auth] ========== CLAUDE CODE AUTH DEBUG ==========")
 
     // First try multi-account system
     const settings = db
@@ -183,24 +192,11 @@ function getClaudeCodeToken(): string | null {
         .get()
 
       if (account?.oauthToken) {
-        console.log(
-          "[claude-auth] Using multi-account system, activeAccountId:",
-          settings.activeAccountId,
-        )
         const decrypted = decryptToken(account.oauthToken)
-        console.log("[claude-auth] Token decrypted successfully")
-        console.log(
-          "[claude-auth] Token preview:",
-          decrypted.slice(0, 20) + "..." + decrypted.slice(-10),
-        )
-        console.log("[claude-auth] Token total length:", decrypted.length)
-        console.log("[claude-auth] ============================================")
+        cachedClaudeCodeToken = decrypted
+        cachedClaudeCodeTokenTs = Date.now()
         return decrypted
       }
-
-      console.log(
-        "[claude-auth] Active account not found or has no token, falling back to legacy",
-      )
     }
 
     // Fallback to legacy table
@@ -210,37 +206,20 @@ function getClaudeCodeToken(): string | null {
       .where(eq(claudeCodeCredentials.id, "default"))
       .get()
 
-    console.log(
-      "[claude-auth] Legacy credential record:",
-      cred
-        ? {
-            id: cred.id,
-            hasOauthToken: !!cred.oauthToken,
-            encryptedTokenLength: cred.oauthToken?.length ?? 0,
-            connectedAt: cred.connectedAt,
-            userId: cred.userId,
-          }
-        : null,
-    )
-
     if (!cred?.oauthToken) {
-      console.log("[claude-auth] No Claude Code credentials found")
-      console.log("[claude-auth] ============================================")
+      cachedClaudeCodeToken = null
+      cachedClaudeCodeTokenTs = Date.now()
       return null
     }
 
     const decrypted = decryptToken(cred.oauthToken)
-    console.log("[claude-auth] Token decrypted successfully (legacy)")
-    console.log(
-      "[claude-auth] Token preview:",
-      decrypted.slice(0, 20) + "..." + decrypted.slice(-10),
-    )
-    console.log("[claude-auth] Token total length:", decrypted.length)
-    console.log("[claude-auth] ============================================")
-
+    cachedClaudeCodeToken = decrypted
+    cachedClaudeCodeTokenTs = Date.now()
     return decrypted
   } catch (error) {
     console.error("[claude-auth] Error getting Claude Code token:", error)
+    cachedClaudeCodeToken = null
+    cachedClaudeCodeTokenTs = Date.now()
     return null
   }
 }
@@ -1473,73 +1452,12 @@ export const claudeRouter = router({
               CLAUDE_CONFIG_DIR: isolatedConfigDir,
             }
 
-            // Log auth method being used
-            console.log("[claude-auth] ========== AUTH METHOD USED ==========")
-            console.log(
-              "[claude-auth] hasExistingApiConfig:",
-              hasExistingApiConfig,
-            )
-            console.log(
-              "[claude-auth] claudeCodeToken available:",
-              !!claudeCodeToken,
-            )
-            console.log(
-              "[claude-auth] Using CLAUDE_CODE_OAUTH_TOKEN:",
-              !!finalEnv.CLAUDE_CODE_OAUTH_TOKEN,
-            )
-            console.log(
-              "[claude-auth] Using ANTHROPIC_API_KEY:",
-              !!finalEnv.ANTHROPIC_API_KEY,
-            )
-            console.log(
-              "[claude-auth] Using ANTHROPIC_BASE_URL:",
-              finalEnv.ANTHROPIC_BASE_URL || "(default)",
-            )
-            console.log(
-              "[claude-auth] Using ANTHROPIC_AUTH_TOKEN:",
-              !!finalEnv.ANTHROPIC_AUTH_TOKEN,
-            )
-            console.log(
-              "[claude-auth] ============================================",
-            )
-
             // Get bundled Claude binary path
             const claudeBinaryPath = getBundledClaudeBinaryPath()
 
             const resumeSessionId =
               input.sessionId || existingSessionId || undefined
 
-            // DEBUG: Session resume path tracing
-            const expectedSanitizedCwd = input.cwd.replace(/[/.]/g, "-")
-            const expectedSessionPath = path.join(
-              isolatedConfigDir,
-              "projects",
-              expectedSanitizedCwd,
-              `${resumeSessionId}.jsonl`,
-            )
-            console.log(`[claude] ========== SESSION DEBUG ==========`)
-            console.log(`[claude] subChatId: ${input.subChatId}`)
-            console.log(`[claude] cwd: ${input.cwd}`)
-            console.log(
-              `[claude] sanitized cwd (expected): ${expectedSanitizedCwd}`,
-            )
-            console.log(`[claude] CLAUDE_CONFIG_DIR: ${isolatedConfigDir}`)
-            console.log(
-              `[claude] Expected session path: ${expectedSessionPath}`,
-            )
-            console.log(`[claude] Session ID to resume: ${resumeSessionId}`)
-            console.log(
-              `[claude] Existing sessionId from DB: ${existingSessionId}`,
-            )
-            console.log(`[claude] Resume at UUID: ${resumeAtUuid}`)
-            console.log(
-              `[claude] Fork resume: ${shouldForkResume}, fork UUID: ${forkResumeAtUuid}`,
-            )
-            console.log(`[claude] ========== END SESSION DEBUG ==========`)
-
-            console.log(
-              `[SD] Query options - cwd: ${input.cwd}, projectPath: ${input.projectPath || "(not set)"}, mcpServers: ${mcpServersForSdk ? Object.keys(mcpServersForSdk).join(", ") : "(none)"}`,
-            )
             if (finalCustomConfig) {
               const redactedConfig = {
                 ...finalCustomConfig,
@@ -1558,59 +1476,13 @@ export const claudeRouter = router({
 
             const resolvedModel = finalCustomConfig?.model || input.model
 
-            // DEBUG: If using Ollama, test if it's actually responding
-            if (isUsingOllama && finalCustomConfig) {
-              console.log("[Ollama Debug] Testing Ollama connectivity...")
-              try {
-                const testResponse = await fetch(
-                  `${finalCustomConfig.baseUrl}/api/tags`,
-                  {
-                    signal: AbortSignal.timeout(2000),
-                  },
-                )
-                if (testResponse.ok) {
-                  const data = await testResponse.json()
-                  const models = data.models?.map((m: any) => m.name) || []
-                  console.log(
-                    "[Ollama Debug] Ollama is responding. Available models:",
-                    models,
-                  )
-
-                  if (!models.includes(finalCustomConfig.model)) {
-                    console.error(
-                      `[Ollama Debug] WARNING: Model "${finalCustomConfig.model}" not found in Ollama!`,
-                    )
-                    console.error(`[Ollama Debug] Available models:`, models)
-                    console.error(
-                      `[Ollama Debug] This will likely cause the stream to hang or fail silently.`,
-                    )
-                  } else {
-                    console.log(
-                      `[Ollama Debug] ✓ Model "${finalCustomConfig.model}" is available`,
-                    )
-                  }
-                } else {
-                  console.error(
-                    "[Ollama Debug] Ollama returned error:",
-                    testResponse.status,
-                  )
-                }
-              } catch (err) {
-                console.error(
-                  "[Ollama Debug] Failed to connect to Ollama:",
-                  err,
-                )
-              }
-            }
+            // Skip MCP servers entirely in offline mode (Ollama) - they slow down initialization by 60+ seconds
 
             // Skip MCP servers entirely in offline mode (Ollama) - they slow down initialization by 60+ seconds
             // Otherwise pass all MCP servers - the SDK will handle connection
             let mcpServersFiltered: Record<string, any> | undefined
 
             if (isUsingOllama) {
-              console.log(
-                "[Ollama] Skipping MCP servers to speed up initialization",
-              )
               mcpServersFiltered = undefined
             } else {
               // Ensure MCP tokens are fresh (refresh if within 5 min of expiry)
@@ -1628,36 +1500,12 @@ export const claudeRouter = router({
               }
             }
 
-            // Log SDK configuration for debugging
-            if (isUsingOllama) {
-              console.log("[Ollama Debug] SDK Configuration:", {
-                model: resolvedModel,
-                baseUrl: finalEnv.ANTHROPIC_BASE_URL,
-                cwd: input.cwd,
-                configDir: isolatedConfigDir,
-                hasAuthToken: !!finalEnv.ANTHROPIC_AUTH_TOKEN,
-                tokenPreview:
-                  finalEnv.ANTHROPIC_AUTH_TOKEN?.slice(0, 10) + "...",
-              })
-              console.log("[Ollama Debug] Session settings:", {
-                resumeSessionId: resumeSessionId || "none (first message)",
-                mode: resumeSessionId ? "resume" : "continue",
-                note: resumeSessionId
-                  ? "Resuming existing session to maintain chat history"
-                  : "Starting new session with continue mode",
-              })
-            }
-
             // Read AGENTS.md from project root if it exists
             let agentsMdContent: string | undefined
             try {
               const agentsMdPath = path.join(input.cwd, "AGENTS.md")
               agentsMdContent = await fs.readFile(agentsMdPath, "utf-8")
-              if (agentsMdContent.trim()) {
-                console.log(
-                  `[claude] Found AGENTS.md at ${agentsMdPath} (${agentsMdContent.length} chars)`,
-                )
-              } else {
+              if (!agentsMdContent.trim()) {
                 agentsMdContent = undefined
               }
             } catch {
@@ -1791,7 +1639,6 @@ ${historyText}[CURRENT REQUEST]
 ${prompt}
 [/CURRENT REQUEST]`
               finalQueryPrompt = ollamaContext
-              console.log("[Ollama] Context prefix added to prompt")
             }
 
             // System prompt config - use preset for both Claude and Ollama
@@ -1852,7 +1699,6 @@ ${prompt}
                     ) {
                       toolInput.file_path = toolInput.file
                       delete toolInput.file
-                      console.log("[Ollama] Fixed Read tool: file -> file_path")
                     }
                     // Write: "file" -> "file_path", "content" is usually correct
                     if (
@@ -1862,9 +1708,6 @@ ${prompt}
                     ) {
                       toolInput.file_path = toolInput.file
                       delete toolInput.file
-                      console.log(
-                        "[Ollama] Fixed Write tool: file -> file_path",
-                      )
                     }
                     // Edit: "file" -> "file_path"
                     if (
@@ -1874,21 +1717,16 @@ ${prompt}
                     ) {
                       toolInput.file_path = toolInput.file
                       delete toolInput.file
-                      console.log("[Ollama] Fixed Edit tool: file -> file_path")
                     }
                     // Glob: "path" might be passed as "directory" or "dir"
                     if (toolName === "Glob") {
                       if (toolInput.directory && !toolInput.path) {
                         toolInput.path = toolInput.directory
                         delete toolInput.directory
-                        console.log(
-                          "[Ollama] Fixed Glob tool: directory -> path",
-                        )
                       }
                       if (toolInput.dir && !toolInput.path) {
                         toolInput.path = toolInput.dir
                         delete toolInput.dir
-                        console.log("[Ollama] Fixed Glob tool: dir -> path")
                       }
                     }
                     // Grep: "query" -> "pattern", "directory" -> "path"
@@ -1896,16 +1734,10 @@ ${prompt}
                       if (toolInput.query && !toolInput.pattern) {
                         toolInput.pattern = toolInput.query
                         delete toolInput.query
-                        console.log(
-                          "[Ollama] Fixed Grep tool: query -> pattern",
-                        )
                       }
                       if (toolInput.directory && !toolInput.path) {
                         toolInput.path = toolInput.directory
                         delete toolInput.directory
-                        console.log(
-                          "[Ollama] Fixed Grep tool: directory -> path",
-                        )
                       }
                     }
                     // Bash: "cmd" -> "command"
@@ -1916,7 +1748,6 @@ ${prompt}
                     ) {
                       toolInput.command = toolInput.cmd
                       delete toolInput.cmd
-                      console.log("[Ollama] Fixed Bash tool: cmd -> command")
                     }
                   }
 
@@ -2105,16 +1936,6 @@ ${prompt}
               // Plan mode: track ExitPlanMode to stop after plan is complete
               let exitPlanModeToolCallId: string | null = null
 
-              if (isUsingOllama) {
-                console.log(`[Ollama] ===== STARTING STREAM ITERATION =====`)
-                console.log(`[Ollama] Model: ${finalCustomConfig?.model}`)
-                console.log(`[Ollama] Base URL: ${finalCustomConfig?.baseUrl}`)
-                console.log(
-                  `[Ollama] Prompt: "${typeof input.prompt === "string" ? input.prompt.slice(0, 100) : "N/A"}..."`,
-                )
-                console.log(`[Ollama] CWD: ${input.cwd}`)
-              }
-
               try {
                 // Start inactivity timer when stream begins - NOT waiting for first message
                 // This catches cases where the stream never emits any messages
@@ -2125,45 +1946,10 @@ ${prompt}
                   resetInactivityTimer()
 
                   if (abortController.signal.aborted) {
-                    if (isUsingOllama)
-                      console.log(`[Ollama] Stream aborted by user`)
                     break
                   }
 
                   messageCount++
-
-                  // Extra logging for Ollama to diagnose issues
-                  if (isUsingOllama) {
-                    const msgAnyPreview = msg as any
-                    console.log(`[Ollama] ===== MESSAGE #${messageCount} =====`)
-                    console.log(`[Ollama] Type: ${msgAnyPreview.type}`)
-                    console.log(
-                      `[Ollama] Subtype: ${msgAnyPreview.subtype || "none"}`,
-                    )
-                    if (msgAnyPreview.event) {
-                      console.log(
-                        `[Ollama] Event: ${msgAnyPreview.event.type}`,
-                        {
-                          delta_type: msgAnyPreview.event.delta?.type,
-                          content_block_type:
-                            msgAnyPreview.event.content_block?.type,
-                        },
-                      )
-                    }
-                    if (msgAnyPreview.message?.content) {
-                      console.log(
-                        `[Ollama] Message content blocks:`,
-                        msgAnyPreview.message.content.length,
-                      )
-                      msgAnyPreview.message.content.forEach(
-                        (block: any, idx: number) => {
-                          console.log(
-                            `[Ollama]   Block ${idx}: type=${block.type}, text_length=${block.text?.length || 0}`,
-                          )
-                        },
-                      )
-                    }
-                  }
 
                   // Warn if SDK initialization is slow (MCP delay)
                   if (!firstMessageReceived) {
@@ -2507,10 +2293,7 @@ ${prompt}
                 // Warn if stream yielded no messages (offline mode issue)
                 const streamDuration = Date.now() - streamIterationStart
                 if (isUsingOllama) {
-                  console.log(`[Ollama] ===== STREAM COMPLETED =====`)
-                  console.log(`[Ollama] Total messages: ${messageCount}`)
-                  console.log(`[Ollama] Duration: ${streamDuration}ms`)
-                  console.log(`[Ollama] Chunks emitted: ${chunkCount}`)
+                  console.log(`[Ollama] Stream completed: ${messageCount} msgs, ${streamDuration}ms, ${chunkCount} chunks`)
                 }
 
                 if (messageCount === 0) {

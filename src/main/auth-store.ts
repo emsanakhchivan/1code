@@ -24,6 +24,7 @@ export interface AuthData {
  */
 export class AuthStore {
   private filePath: string
+  private cachedData: AuthData | null | undefined = undefined // undefined = not loaded yet
 
   constructor(userDataPath: string) {
     this.filePath = join(userDataPath, "auth.dat") // .dat for encrypted data
@@ -52,6 +53,7 @@ export class AuthStore {
         // Encrypt using OS keychain (macOS Keychain, Windows DPAPI, Linux Secret Service)
         const encrypted = safeStorage.encryptString(jsonData)
         writeFileSync(this.filePath, encrypted)
+        this.cachedData = data
       } else {
         // Fallback: store with warning (should rarely happen)
         console.warn("safeStorage not available - storing auth data without encryption")
@@ -67,12 +69,19 @@ export class AuthStore {
    * Load authentication data (decrypts if encrypted)
    */
   load(): AuthData | null {
+    // Return cached data if already loaded
+    if (this.cachedData !== undefined) {
+      return this.cachedData
+    }
+
     try {
       // Try encrypted file first
       if (existsSync(this.filePath) && this.isEncryptionAvailable()) {
         const encrypted = readFileSync(this.filePath)
         const decrypted = safeStorage.decryptString(encrypted)
-        return JSON.parse(decrypted)
+        const data = JSON.parse(decrypted)
+        this.cachedData = data
+        return data
       }
       
       // Fallback: try unencrypted file (for migration or when encryption unavailable)
@@ -86,7 +95,8 @@ export class AuthStore {
           this.save(data)
           unlinkSync(fallbackPath) // Remove unencrypted file after migration
         }
-        
+
+        this.cachedData = data
         return data
       }
       
@@ -100,12 +110,14 @@ export class AuthStore {
         this.save(data)
         unlinkSync(legacyPath) // Remove legacy unencrypted file
         console.log("Migrated auth data from plaintext to encrypted storage")
-        
+
+        this.cachedData = data
         return data
       }
 
       return null
     } catch {
+      this.cachedData = null
       console.error("Failed to load auth data")
       return null
     }
@@ -115,6 +127,7 @@ export class AuthStore {
    * Clear all stored authentication data (both encrypted and fallback files)
    */
   clear(): void {
+    this.cachedData = undefined // Invalidate cache
     try {
       // Remove encrypted file
       if (existsSync(this.filePath)) {

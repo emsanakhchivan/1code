@@ -52,6 +52,7 @@ export function initDatabase() {
   sqlite = new Database(dbPath)
   sqlite.pragma("journal_mode = WAL")
   sqlite.pragma("foreign_keys = ON")
+  sqlite.pragma("synchronous = NORMAL")
 
   // Create Drizzle instance
   db = drizzle(sqlite, { schema })
