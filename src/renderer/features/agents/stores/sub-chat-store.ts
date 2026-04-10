@@ -5,7 +5,6 @@ import { agentChatStore } from "./agent-chat-store"
 import { getWindowId } from "../../../contexts/WindowContext"
 import { clearTaskSnapshotCache } from "../ui/agent-task-tools"
 import { clearSubChatRuntimeCaches } from "./sub-chat-runtime-cleanup"
-import { clearVirtualizedCache } from "../main/virtualized-messages-list"
 import { getDefaultRatios, addPaneRatio, removePaneRatio, clearSubChatMapAtoms } from "../atoms"
 import { appStore } from "../../../lib/jotai-store"
 
@@ -252,8 +251,6 @@ export const useAgentSubChatStore = create<AgentSubChatStore>((set, get) => ({
     // MEMORY LEAK FIX: Clear Map-based Jotai atoms
     clearSubChatMapAtoms(appStore.get, appStore.set, subChatId)
 
-    // Clear virtualized message height cache for this sub-chat
-    clearVirtualizedCache(subChatId)
   },
 
   togglePinSubChat: (subChatId) => {

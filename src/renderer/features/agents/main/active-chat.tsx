@@ -243,7 +243,7 @@ import { TextSelectionPopover } from "../ui/text-selection-popover"
 import { autoRenameAgentChat } from "../utils/auto-rename"
 import { generateCommitToPrMessage, generatePrMessage, generateReviewMessage } from "../utils/pr-message"
 import { ChatInputArea } from "./chat-input-area"
-import { VirtualizedMessagesSection } from "./virtualized-messages-list"
+import { IsolatedMessagesSection } from "./isolated-messages-section"
 const clearSubChatSelectionAtom = atom(null, () => {})
 const isSubChatMultiSelectModeAtom = atom(false)
 const selectedSubChatIdsAtom = atom(new Set<string>())
@@ -4765,10 +4765,9 @@ const ChatViewInner = memo(function ChatViewInner({
           }}
         >
           <div>
-            {/* VIRTUALIZED: Messages rendered via virtualized list
-                Only visible groups are in the DOM, reducing nodes from O(N) to O(viewport)
+            {/* Messages rendered with content-visibility: auto optimization
                 Each group subscribes to specific Jotai atoms for fine-grained updates */}
-            <VirtualizedMessagesSection
+            <IsolatedMessagesSection
               key={subChatId}
               subChatId={subChatId}
               chatId={parentChatId}
@@ -4777,7 +4776,6 @@ const ChatViewInner = memo(function ChatViewInner({
               stickyTopClass={stickyTopClass}
               sandboxSetupError={sandboxSetupError}
               onRetrySetup={onRetrySetup}
-              scrollContainerRef={chatContainerRef}
               UserBubbleComponent={AgentUserMessageBubble}
               ToolCallComponent={AgentToolCall}
               MessageGroupWrapper={MessageGroup}
