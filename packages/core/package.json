@@ -1,0 +1,72 @@
+{
+  "name": "@1code/core",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Shared core logic for 1Code - Electron-bağımsız iş mantığı",
+  "type": "module",
+  "exports": {
+    "./claude": {
+      "types": "./src/claude/index.ts",
+      "default": "./src/claude/index.ts"
+    },
+    "./claude/types": {
+      "types": "./src/claude/types.ts",
+      "default": "./src/claude/types.ts"
+    },
+    "./claude/transform": {
+      "types": "./src/claude/transform.ts",
+      "default": "./src/claude/transform.ts"
+    },
+    "./claude/token-estimation": {
+      "types": "./src/claude/token-estimation.ts",
+      "default": "./src/claude/token-estimation.ts"
+    },
+    "./claude/offline-handler": {
+      "types": "./src/claude/offline-handler.ts",
+      "default": "./src/claude/offline-handler.ts"
+    },
+    "./db": {
+      "types": "./src/db/index.ts",
+      "default": "./src/db/index.ts"
+    },
+    "./db/schema": {
+      "types": "./src/db/schema/index.ts",
+      "default": "./src/db/schema/index.ts"
+    },
+    "./db/utils": {
+      "types": "./src/db/utils.ts",
+      "default": "./src/db/utils.ts"
+    },
+    "./platform": {
+      "types": "./src/platform/index.ts",
+      "default": "./src/platform/index.ts"
+    },
+    "./platform/types": {
+      "types": "./src/platform/types.ts",
+      "default": "./src/platform/types.ts"
+    },
+    "./ollama": {
+      "types": "./src/ollama/index.ts",
+      "default": "./src/ollama/index.ts"
+    },
+    "./ollama/detector": {
+      "types": "./src/ollama/detector.ts",
+      "default": "./src/ollama/detector.ts"
+    },
+    "./plugins": {
+      "types": "./src/plugins/index.ts",
+      "default": "./src/plugins/index.ts"
+    },
+    "./types": {
+      "types": "./src/types/index.ts",
+      "default": "./src/types/index.ts"
+    }
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.36.0",
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

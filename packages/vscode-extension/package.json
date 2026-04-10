@@ -1,0 +1,111 @@
+{
+  "name": "1code-vscode",
+  "displayName": "1Code - AI Code Agent",
+  "description": "AI-powered code agent with parallel chat sessions",
+  "version": "0.0.1",
+  "publisher": "21st-dev",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Programming Languages",
+    "Chat"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "1code",
+          "title": "1Code",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "1code": [
+        {
+          "type": "webview",
+          "id": "1code.chat",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "1code.newChat",
+        "title": "1Code: New Chat"
+      },
+      {
+        "command": "1code.openSidebar",
+        "title": "1Code: Open Chat Sidebar"
+      },
+      {
+        "command": "1code.sendToChat",
+        "title": "1Code: Send to Chat"
+      }
+    ],
+    "configuration": {
+      "title": "1Code",
+      "properties": {
+        "1code.activeProviderId": {
+          "type": "string",
+          "default": "claude-api",
+          "description": "Active provider ID (built-in: claude-api, ollama; or DB provider UUID)"
+        },
+        "1code.model": {
+          "type": "string",
+          "default": "claude-sonnet-4-6",
+          "description": "Model to use for the active provider"
+        },
+        "1code.defaultMode": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "agent"
+          ],
+          "default": "agent",
+          "description": "Default mode for new chats"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "bun run build",
+    "build": "bun run build:extension && bun run build:webview && bun run build:cli",
+    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:better-sqlite3 --format=cjs --platform=node --target=node20 --sourcemap",
+    "build:cli": "node -e \"const fs=require('fs');const p=require('path');const src=p.resolve(__dirname,'../../node_modules/@anthropic-ai/claude-agent-sdk/cli.js');const dst=p.resolve('resources/cli.js');if(fs.existsSync(src)){fs.copyFileSync(src,dst);console.log('cli.js copied to resources/')}else{console.error('cli.js not found at',src);process.exit(1)}\"",
+    "build:webview": "vite build --config vite.webview.config.ts",
+    "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:better-sqlite3 --format=cjs --platform=node --target=node20 --sourcemap --watch",
+    "watch:webview": "vite build --config vite.webview.config.ts --watch",
+    "package": "vsce package --no-dependencies",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/better-sqlite3": "^7.6.9",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.4.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.0",
+    "autoprefixer": "^10.4.0"
+  },
+  "dependencies": {
+    "@1code/core": "workspace:*",
+    "better-sqlite3": "^11.0.0",
+    "drizzle-orm": "^0.36.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "jotai": "^2.10.0",
+    "zustand": "^5.0.0",
+    "motion": "^11.15.0"
+  }
+}
