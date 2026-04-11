@@ -1,0 +1,1 @@
+ALTER TABLE `sub_chats` ADD `message_count` integer DEFAULT 0;

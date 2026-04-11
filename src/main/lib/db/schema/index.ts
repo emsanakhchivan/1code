@@ -79,6 +79,10 @@ export const subChats = sqliteTable("sub_chats", {
   streamId: text("stream_id"), // Track in-progress streams
   mode: text("mode").notNull().default("agent"), // "plan" | "agent"
   messages: text("messages").notNull().default("[]"), // JSON array
+  // Pre-computed stats (updated on every message save to avoid expensive JSON.parse on read)
+  fileStats: text("file_stats"), // JSON: { additions, deletions, fileCount } or null
+  hasPendingPlan: integer("has_pending_plan", { mode: "boolean" }).default(false), // true when plan mode sub-chat has completed ExitPlanMode
+  messageCount: integer("message_count").default(0), // Number of messages (avoids JSON.parse just to count)
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(
     () => new Date(),
   ),
