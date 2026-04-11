@@ -295,11 +295,19 @@ export const ArchivePopover = memo(function ArchivePopover({ trigger }: ArchiveP
     onSuccess: (restoredChat) => {
       // Optimistically add restored chat to the main list cache
       if (restoredChat) {
+        // Serialize Date objects from Drizzle before writing to cache
+        const sd = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
+        const serialized = {
+          ...restoredChat,
+          createdAt: sd(restoredChat.createdAt),
+          updatedAt: sd(restoredChat.updatedAt),
+          archivedAt: sd(restoredChat.archivedAt),
+        }
         utils.chats.list.setData({}, (oldData) => {
-          if (!oldData) return [restoredChat]
+          if (!oldData) return [serialized]
           // Add to beginning if not already present
-          if (oldData.some((c) => c.id === restoredChat.id)) return oldData
-          return [restoredChat, ...oldData]
+          if (oldData.some((c) => c.id === serialized.id)) return oldData
+          return [serialized, ...oldData]
         })
       }
       // Invalidate both lists to refresh

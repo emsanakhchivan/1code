@@ -4045,7 +4045,7 @@ const ChatViewInner = memo(function ChatViewInner({
     // Desktop app: Optimistic update for chats.list to update sidebar immediately
     const queryClient = getQueryClient()
     if (queryClient) {
-      const now = new Date()
+      const now = new Date().toISOString()
       const queries = queryClient.getQueryCache().getAll()
       const chatsListQuery = queries.find(q =>
         Array.isArray(q.queryKey) &&
@@ -5709,11 +5709,19 @@ export function ChatView({
   const restoreWorkspaceMutation = trpc.chats.restore.useMutation({
     onSuccess: (restoredChat) => {
       if (restoredChat) {
+        // Serialize Date objects from Drizzle before writing to cache
+        const sd = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
+        const serialized = {
+          ...restoredChat,
+          createdAt: sd(restoredChat.createdAt),
+          updatedAt: sd(restoredChat.updatedAt),
+          archivedAt: sd(restoredChat.archivedAt),
+        }
         // Update the main chat list cache
         trpcUtils.chats.list.setData({}, (oldData) => {
-          if (!oldData) return [restoredChat]
-          if (oldData.some((c) => c.id === restoredChat.id)) return oldData
-          return [restoredChat, ...oldData]
+          if (!oldData) return [serialized]
+          if (oldData.some((c) => c.id === serialized.id)) return oldData
+          return [serialized, ...oldData]
         })
       }
       // Invalidate both lists to refresh
