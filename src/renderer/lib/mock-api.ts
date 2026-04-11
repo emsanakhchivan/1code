@@ -45,6 +45,142 @@ export function parseMessagesSync(messagesInput: string | AnyObj[] | null): AnyO
   }
 }
 
+/**
+ * Normalize message parts from various DB/storage formats to the AI SDK format.
+ * Handles: old tool-invocation → tool-{toolName}, Codex MCP, ACP tool types, state normalization.
+ */
+export function normalizeMessageParts(messages: AnyObj[]): AnyObj[] {
+  return messages.map((msg: AnyObj) => {
+    if (!msg.parts) return msg
+    return {
+      ...msg,
+      parts: msg.parts.map((part: AnyObj) => {
+        // Migrate old "tool-invocation" type to "tool-{toolName}"
+        if (part.type === "tool-invocation" && part.toolName) {
+          return {
+            ...part,
+            type: `tool-${part.toolName}`,
+            toolCallId: part.toolCallId || part.toolInvocationId,
+            input: part.input || part.args,
+          }
+        }
+        // Normalize Codex MCP wrapper shape
+        if (
+          part.type?.startsWith("tool-Tool:") ||
+          part.toolName?.startsWith("Tool:") ||
+          part.input?.toolName?.startsWith("Tool:")
+        ) {
+          const normalizedMcpPart = normalizeCodexToolPart(part) as AnyObj
+          if (normalizedMcpPart !== part) {
+            if (normalizedMcpPart.state) {
+              let normalizedState = normalizedMcpPart.state
+              if (normalizedMcpPart.state === "result") {
+                normalizedState =
+                  normalizedMcpPart.result?.success === false
+                    ? "output-error"
+                    : "output-available"
+              }
+              return {
+                ...normalizedMcpPart,
+                state: normalizedState,
+                output:
+                  normalizedMcpPart.output ||
+                  normalizedMcpPart.result,
+              }
+            }
+            return normalizedMcpPart
+          }
+        }
+        // Normalize ACP/codex tool types
+        if (part.type?.startsWith("tool-") && (part.input?.toolName || part.type.includes(" ") || part.type === "tool-acp.acp_provider_agent_dynamic_tool")) {
+          const acpVerbMap: AnyObj = {
+            Read: "Read", Run: "Bash", List: "Glob", Search: "Grep",
+            Grep: "Grep", Glob: "Glob", Edit: "Edit", Write: "Write",
+            Thought: "Thinking", Fetch: "WebFetch",
+          }
+          let parsedInput: AnyObj = {}
+          if (part.input && typeof part.input === "object") {
+            parsedInput = part.input as AnyObj
+          } else if (typeof part.input === "string") {
+            try {
+              const parsed = JSON.parse(part.input)
+              if (parsed && typeof parsed === "object") {
+                parsedInput = parsed as AnyObj
+              }
+            } catch {
+              parsedInput = {}
+            }
+          }
+          const title: string = parsedInput.toolName || part.type.slice(5)
+          const args: AnyObj =
+            parsedInput.args && typeof parsedInput.args === "object"
+              ? parsedInput.args
+              : parsedInput
+          const spaceIdx = title.indexOf(" ")
+          const verb = spaceIdx === -1 ? title : title.slice(0, spaceIdx)
+          const detail = spaceIdx === -1 ? "" : title.slice(spaceIdx + 1)
+          const toolType = acpVerbMap[verb]
+          if (toolType) {
+            const unwrapped: AnyObj = {
+              ...part,
+              type: `tool-${toolType}`,
+              input: { ...args, _acpTitle: title, _acpDetail: detail },
+            }
+            if (toolType === "Read" && !unwrapped.input.file_path && detail) unwrapped.input.file_path = detail
+            if (toolType === "Bash") {
+              if (Array.isArray(unwrapped.input.command)) {
+                unwrapped.input.command = unwrapped.input.command[unwrapped.input.command.length - 1] || detail
+              } else if (!unwrapped.input.command && detail) {
+                unwrapped.input.command = detail
+              }
+            }
+            if (toolType === "Grep" && !unwrapped.input.pattern && detail) unwrapped.input.pattern = detail
+            if (toolType === "Glob" && !unwrapped.input.pattern && detail) unwrapped.input.pattern = detail
+            if (unwrapped.state) {
+              let normalizedState = unwrapped.state
+              if (unwrapped.state === "result") {
+                normalizedState = unwrapped.result?.success === false ? "output-error" : "output-available"
+              }
+              return { ...unwrapped, state: normalizedState, output: unwrapped.output || unwrapped.result }
+            }
+            return unwrapped
+          }
+        }
+        // Normalize state field from DB format to AI SDK format
+        if (part.type?.startsWith("tool-") && part.state) {
+          let normalizedState = part.state
+          if (part.state === "result") {
+            normalizedState =
+              part.result?.success === false
+                ? "output-error"
+                : "output-available"
+          }
+          return {
+            ...part,
+            state: normalizedState,
+            output: part.output || part.result,
+          }
+        }
+        return part
+      }),
+    }
+  })
+}
+
+/**
+ * Parse and normalize messages from a JSON string (used for lazy-loading a single sub-chat's messages).
+ */
+export function parseAndNormalizeMessages(messagesJson: string | null | undefined): AnyObj[] {
+  if (!messagesJson) return []
+  try {
+    const parsed = JSON.parse(messagesJson)
+    if (!Array.isArray(parsed)) return []
+    return normalizeMessageParts(parsed)
+  } catch {
+    return []
+  }
+}
+
 export const api = {
   agents: {
     getAgentChats: {
@@ -70,7 +206,8 @@ export const api = {
           },
         )
 
-        // Memoize transformation to prevent infinite re-renders
+        // Lightweight transformation: messages are loaded on-demand per sub-chat
+        // via getSubChatMessages to avoid JSON.parse on ALL sub-chats during workspace switch
         const transformedData = useMemo(() => {
           if (!result.data) return null
           return {
@@ -78,146 +215,17 @@ export const api = {
             // Desktop uses worktrees, not sandboxes
             sandbox_id: null,
             meta: null,
-            // Map subChats to expected format
+            // Map subChats to expected format WITHOUT parsing messages
             subChats: result.data.subChats?.map((sc: AnyObj) => {
-              let parsedMessages = []
-              try {
-                parsedMessages = sc.messages ? JSON.parse(sc.messages) : []
-                // Transform old tool-invocation parts to new tool-{toolName} format
-                parsedMessages = parsedMessages.map((msg: AnyObj) => {
-                  if (!msg.parts) return msg
-                  return {
-                    ...msg,
-                    parts: msg.parts.map((part: AnyObj) => {
-                      // Migrate old "tool-invocation" type to "tool-{toolName}"
-                      if (part.type === "tool-invocation" && part.toolName) {
-                        return {
-                          ...part,
-                          type: `tool-${part.toolName}`,
-                          toolCallId: part.toolCallId || part.toolInvocationId,
-                          input: part.input || part.args,
-                        }
-                      }
-                      // Normalize Codex MCP wrapper shape (e.g. tool-Tool: notion/notion-search)
-                      // to canonical tool-mcp__{server}__{tool} so MCP renderer can parse it.
-                      if (
-                        part.type?.startsWith("tool-Tool:") ||
-                        part.toolName?.startsWith("Tool:") ||
-                        part.input?.toolName?.startsWith("Tool:")
-                      ) {
-                        const normalizedMcpPart = normalizeCodexToolPart(part) as AnyObj
-                        if (normalizedMcpPart !== part) {
-                          if (normalizedMcpPart.state) {
-                            let normalizedState = normalizedMcpPart.state
-                            if (normalizedMcpPart.state === "result") {
-                              normalizedState =
-                                normalizedMcpPart.result?.success === false
-                                  ? "output-error"
-                                  : "output-available"
-                            }
-                            return {
-                              ...normalizedMcpPart,
-                              state: normalizedState,
-                              output:
-                                normalizedMcpPart.output ||
-                                normalizedMcpPart.result,
-                            }
-                          }
-                          return normalizedMcpPart
-                        }
-                      }
-                      // Normalize ACP/codex tool types (e.g. "tool-Read README.md" → "tool-Read")
-                      // Detects ACP parts by: title-based type with space, or proxy tool name, or input.toolName present
-                      if (part.type?.startsWith("tool-") && (part.input?.toolName || part.type.includes(" ") || part.type === "tool-acp.acp_provider_agent_dynamic_tool")) {
-                        const acpVerbMap: AnyObj = {
-                          Read: "Read", Run: "Bash", List: "Glob", Search: "Grep",
-                          Grep: "Grep", Glob: "Glob", Edit: "Edit", Write: "Write",
-                          Thought: "Thinking", Fetch: "WebFetch",
-                        }
-                        let parsedInput: AnyObj = {}
-                        if (part.input && typeof part.input === "object") {
-                          parsedInput = part.input as AnyObj
-                        } else if (typeof part.input === "string") {
-                          try {
-                            const parsed = JSON.parse(part.input)
-                            if (parsed && typeof parsed === "object") {
-                              parsedInput = parsed as AnyObj
-                            }
-                          } catch {
-                            parsedInput = {}
-                          }
-                        }
-                        const title: string = parsedInput.toolName || part.type.slice(5)
-                        const args: AnyObj =
-                          parsedInput.args && typeof parsedInput.args === "object"
-                            ? parsedInput.args
-                            : parsedInput
-                        const spaceIdx = title.indexOf(" ")
-                        const verb = spaceIdx === -1 ? title : title.slice(0, spaceIdx)
-                        const detail = spaceIdx === -1 ? "" : title.slice(spaceIdx + 1)
-                        const toolType = acpVerbMap[verb]
-                        if (toolType) {
-                          const unwrapped: AnyObj = {
-                            ...part,
-                            type: `tool-${toolType}`,
-                            input: { ...args, _acpTitle: title, _acpDetail: detail },
-                          }
-                          if (toolType === "Read" && !unwrapped.input.file_path && detail) unwrapped.input.file_path = detail
-                          if (toolType === "Bash") {
-                            if (Array.isArray(unwrapped.input.command)) {
-                              unwrapped.input.command = unwrapped.input.command[unwrapped.input.command.length - 1] || detail
-                            } else if (!unwrapped.input.command && detail) {
-                              unwrapped.input.command = detail
-                            }
-                          }
-                          if (toolType === "Grep" && !unwrapped.input.pattern && detail) unwrapped.input.pattern = detail
-                          if (toolType === "Glob" && !unwrapped.input.pattern && detail) unwrapped.input.pattern = detail
-                          // State normalization
-                          if (unwrapped.state) {
-                            let normalizedState = unwrapped.state
-                            if (unwrapped.state === "result") {
-                              normalizedState = unwrapped.result?.success === false ? "output-error" : "output-available"
-                            }
-                            return { ...unwrapped, state: normalizedState, output: unwrapped.output || unwrapped.result }
-                          }
-                          return unwrapped
-                        }
-                      }
-                      // Normalize state field from DB format to AI SDK format
-                      // DB stores: "result", "call" -> AI SDK expects: "output-available", "call"
-                      if (part.type?.startsWith("tool-") && part.state) {
-                        let normalizedState = part.state
-                        if (part.state === "result") {
-                          // Check if it was an error result
-                          normalizedState =
-                            part.result?.success === false
-                              ? "output-error"
-                              : "output-available"
-                        }
-                        // Also add output field from result if present (for diff display)
-                        return {
-                          ...part,
-                          state: normalizedState,
-                          output: part.output || part.result,
-                        }
-                      }
-                      return part
-                    }),
-                  }
-                })
-              } catch {
-                console.warn(
-                  "[mock-api] Failed to parse messages for subChat:",
-                  sc.id,
-                )
-                parsedMessages = []
-              }
               return {
                 ...sc,
                 created_at: sc.createdAt,
                 updated_at: sc.updatedAt,
-                messages: parsedMessages,
+                // messages may be a JSON string (from cache update after streaming) or undefined
+                // Leave as-is; parseMessagesSync handles both cases lazily
+                messages: sc.messages || null,
                 stream_id: null,
+                messageCount: sc.messageCount ?? 0,
               }
             }),
           }
@@ -631,4 +639,32 @@ export const api = {
       }),
     },
   },
+}
+
+/**
+ * Lazy-load messages for ALL sub-chats that will be rendered.
+ * Uses batch endpoint to fetch messages for all tabsToRender IDs at once,
+ * avoiding JSON.parse on ALL sub-chats during workspace switch while still
+ * providing messages for every rendered tab (not just the active one).
+ */
+export function useSubChatMessagesBatch(subChatIds: string[]) {
+  const result = trpc.chats.getSubChatMessagesBatch.useQuery(
+    { ids: subChatIds },
+    {
+      enabled: subChatIds.length > 0,
+      staleTime: 60_000,
+      gcTime: 120_000,
+    },
+  )
+
+  const messagesBySubChatId = useMemo(() => {
+    const map = new Map<string, AnyObj[]>()
+    if (!result.data) return map
+    for (const [id, messagesJson] of Object.entries(result.data)) {
+      map.set(id, parseAndNormalizeMessages(messagesJson))
+    }
+    return map
+  }, [result.data])
+
+  return { messagesBySubChatId, isLoading: result.isLoading && subChatIds.length > 0 }
 }

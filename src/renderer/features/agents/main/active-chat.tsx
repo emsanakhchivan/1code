@@ -82,7 +82,7 @@ import { useFileChangeListener, useGitWatcher } from "../../../lib/hooks/use-fil
 import { useRemoteChat } from "../../../lib/hooks/use-remote-chats"
 import { useResolvedHotkeyDisplay } from "../../../lib/hotkeys"
 import { appStore } from "../../../lib/jotai-store"
-import { api, parseMessagesSync } from "../../../lib/mock-api"
+import { api, parseMessagesSync, useSubChatMessagesBatch } from "../../../lib/mock-api"
 import { trpc, trpcClient } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
 import { isDesktopApp, isWindows } from "../../../lib/utils/platform"
@@ -3512,7 +3512,7 @@ const ChatViewInner = memo(function ChatViewInner({
         store.addToAllSubChats({
           id: newSubChat.id,
           name: newSubChat.name || "Fork",
-          created_at: newSubChat.created_at || new Date().toISOString(),
+          created_at: (newSubChat as any).created_at || newSubChat.createdAt?.toISOString() || new Date().toISOString(),
           mode: newMode,
         })
 
@@ -5440,8 +5440,27 @@ export function ChatView({
 
   const isLoading = chatSourceMode === "sandbox" ? isRemoteLoading : isLocalLoading
 
+  // Lazy-load messages for ALL rendered sub-chats (active + split + pinned, up to 3-5)
+  // Uses batch endpoint to avoid JSON.parse on ALL sub-chats during workspace switch,
+  // while still providing messages for every tab that getOrCreateChat() needs.
+  const subChatIdsToLoad = useMemo(() => {
+    const ids = new Set<string>()
+    if (activeSubChatId) ids.add(activeSubChatId)
+    for (const id of splitPaneIds) ids.add(id)
+    for (const id of pinnedSubChatIds) ids.add(id)
+    return Array.from(ids).slice(0, 5) // safety cap
+  }, [activeSubChatId, splitPaneIds, pinnedSubChatIds])
+
+  const { messagesBySubChatId, isLoading: isMessagesLoading } = useSubChatMessagesBatch(subChatIdsToLoad)
+
+  // Keep a ref so getOrCreateChat can check for lazy-loaded messages without
+  // adding the Map (which changes identity on every query result) to its deps.
+  const messagesBySubChatIdRef = useRef(messagesBySubChatId)
+  messagesBySubChatIdRef.current = messagesBySubChatId
+
   // Compute if we're waiting for local chat data (used as loading gate)
-  const isLocalChatLoading = chatSourceMode === "local" && isLocalLoading
+  // Also wait for lazy-loaded messages for the active sub-chat
+  const isLocalChatLoading = chatSourceMode === "local" && (isLocalLoading || isMessagesLoading)
 
   // Projects query for "Open Locally" functionality
   const { data: projects } = trpc.projects.list.useQuery()
@@ -5484,7 +5503,18 @@ export function ChatView({
     updated_at?: Date | string | null
     messages?: any
     stream_id?: string | null
+    messageCount?: number
   }>
+
+  // Merge lazy-loaded messages into agentSubChats for all rendered sub-chats
+  // (messagesBySubChatId loaded above via useSubChatMessagesBatch hook)
+  const agentSubChatsWithMessages = useMemo(() => {
+    if (messagesBySubChatId.size === 0) return agentSubChats
+    return agentSubChats.map(sc => {
+      const msgs = messagesBySubChatId.get(sc.id)
+      return msgs ? { ...sc, messages: msgs } : sc
+    })
+  }, [agentSubChats, messagesBySubChatId])
 
   // Workspace isolation: limit mounted tabs to prevent memory growth
   // CRITICAL: Filter by workspace to prevent rendering sub-chats from other workspaces
@@ -6406,8 +6436,8 @@ Make sure to preserve all functionality from both branches when resolving confli
       return
     }
 
-    // Find the active sub-chat
-    const activeSubChat = agentSubChats.find(sc => sc.id === activeSubChatIdForPlan)
+    // Find the active sub-chat (use merged version with lazy-loaded messages)
+    const activeSubChat = agentSubChatsWithMessages.find(sc => sc.id === activeSubChatIdForPlan)
     if (!activeSubChat) {
       setCurrentPlanPath(null)
       return
@@ -6430,7 +6460,7 @@ Make sure to preserve all functionality from both branches when resolving confli
     }
 
     setCurrentPlanPath(lastPlanPath)
-  }, [agentSubChats, activeSubChatIdForPlan, setCurrentPlanPath])
+  }, [agentSubChatsWithMessages, activeSubChatIdForPlan, setCurrentPlanPath])
 
   const inferProviderFromMessages = useCallback(
     (subChatId?: string): "claude-code" | "codex" => {
@@ -6439,8 +6469,9 @@ Make sure to preserve all functionality from both branches when resolving confli
       const override = subChatProviderOverrides[subChatId]
       if (override) return override
 
-      const subChat = ((agentChat as any)?.subChats || []).find(
-        (sc: any) => sc?.id === subChatId,
+      // Use merged sub-chats (with lazy-loaded messages for the active sub-chat)
+      const subChat = agentSubChatsWithMessages.find(
+        (sc) => sc.id === subChatId,
       ) as { messages?: any } | undefined
       const rawMessages = subChat?.messages
 
@@ -6470,7 +6501,7 @@ Make sure to preserve all functionality from both branches when resolving confli
 
       return "claude-code"
     },
-    [agentChat, subChatProviderOverrides],
+    [agentSubChatsWithMessages, subChatProviderOverrides],
   )
 
   const activeSubChatProvider = useMemo(
@@ -6585,7 +6616,7 @@ Make sure to preserve all functionality from both branches when resolving confli
         const subChats = old.subChats.map((sc: any) => {
           if (sc.id !== subChatId) return sc
           found = true
-          return { ...sc, messages: latestMessagesJson }
+          return { ...sc, messages: latestMessagesJson, messageCount: latestMessages.length }
         })
 
         return found ? { ...old, subChats } : old
@@ -6627,43 +6658,44 @@ Make sure to preserve all functionality from both branches when resolving confli
       const chatSandboxUrl = chatSandboxId ? `https://3003-${chatSandboxId}.e2b.app` : null
       const isRemoteChat = !!(agentChat as any)?.isRemote || !!chatSandboxId
 
-      // Fast path for existing chats. Only inspect messages when a local empty-chat provider override
-      // might require transport recreation.
+      // Fast path for existing chats. If the cached Chat has no messages but
+      // lazy-loaded messages are now available, evict it so it gets recreated.
       const existing = agentChatStore.get(subChatId)
       if (existing) {
         if (isRemoteChat) return existing
 
         const overrideProvider = subChatProviderOverrides[subChatId]
-        if (!overrideProvider) return existing
+        if (!overrideProvider) {
+          // Check if cached Chat has 0 messages but lazy-load now has data
+          const existingMsgCount = Array.isArray((existing as any)?.messages) ? (existing as any).messages.length : 0
+          if (existingMsgCount === 0 && messagesBySubChatIdRef.current.has(subChatId)) {
+            // Evict the empty Chat so it's recreated with messages below.
+            // Guard against infinite loop: only evict if we have actual messages.
+            agentChatStore.delete(subChatId)
+          } else {
+            return existing
+          }
+        } else {
+          const existingProvider: "claude-code" | "codex" =
+            (existing as any)?.transport instanceof ACPChatTransport
+              ? "codex"
+              : "claude-code"
+          if (existingProvider === overrideProvider) return existing
 
-        const existingProvider: "claude-code" | "codex" =
-          (existing as any)?.transport instanceof ACPChatTransport
-            ? "codex"
-            : "claude-code"
-        if (existingProvider === overrideProvider) return existing
+          const subChatForOverride = agentSubChatsWithMessages.find((sc) => sc.id === subChatId)
+          // Use pre-computed messageCount from DB instead of parsing messages JSON
+          const existingMessageCount = subChatForOverride?.messageCount ?? 0
 
-        const subChatForOverride = agentSubChats.find((sc) => sc.id === subChatId)
-        const rawExistingMessages = subChatForOverride?.messages
-        const existingMessageCount = Array.isArray(rawExistingMessages)
-          ? rawExistingMessages.length
-          : typeof rawExistingMessages === "string"
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(rawExistingMessages)
-                  return Array.isArray(parsed) ? parsed.length : 0
-                } catch {
-                  return 0
-                }
-              })()
-            : 0
-
-        if (existingMessageCount > 0) return existing
-        agentChatStore.delete(subChatId)
+          if (existingMessageCount > 0) return existing
+          agentChatStore.delete(subChatId)
+        }
       }
 
-      // Find sub-chat data
-      const subChat = agentSubChats.find((sc) => sc.id === subChatId)
-      const rawMessages = subChat?.messages
+      // Find sub-chat data (use merged version with lazy-loaded messages)
+      const subChat = agentSubChatsWithMessages.find((sc) => sc.id === subChatId)
+      // Fallback: if agentSubChatsWithMessages hasn't merged yet but lazy-load has data,
+      // use the ref directly (avoids stale empty messages after evicting a cached Chat)
+      const rawMessages = subChat?.messages || messagesBySubChatIdRef.current.get(subChatId)
 
       // Use cached sync parser - handles both JSON string and already-parsed array
       // Cache prevents redundant JSON.parse on the same messages
@@ -6873,6 +6905,7 @@ Make sure to preserve all functionality from both branches when resolving confli
       notifyAgentComplete,
       syncFinishedMessagesToChatCache,
       pruneIfDetachedAndIdle,
+      agentSubChatsWithMessages,
     ],
   )
 
@@ -6884,19 +6917,10 @@ Make sure to preserve all functionality from both branches when resolving confli
         ? activeChat.messages.length
         : 0
 
+      // Use pre-computed messageCount from DB instead of parsing messages JSON
       if (messageCount === 0) {
-        const subChat = agentSubChats.find((sc) => sc.id === subChatId)
-        const rawMessages = subChat?.messages
-        if (Array.isArray(rawMessages)) {
-          messageCount = rawMessages.length
-        } else if (typeof rawMessages === "string") {
-          try {
-            const parsed = JSON.parse(rawMessages)
-            messageCount = Array.isArray(parsed) ? parsed.length : 0
-          } catch {
-            messageCount = 0
-          }
-        }
+        const subChat = agentSubChatsWithMessages.find((sc) => sc.id === subChatId)
+        messageCount = subChat?.messageCount ?? 0
       }
 
       if (messageCount > 0) return
@@ -6910,7 +6934,7 @@ Make sure to preserve all functionality from both branches when resolving confli
       agentChatStore.delete(subChatId)
       forceUpdate({})
     },
-    [agentSubChats],
+    [agentSubChatsWithMessages],
   )
 
   // Handle creating a new sub-chat

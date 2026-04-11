@@ -34,6 +34,134 @@ type WorktreeSetupFailurePayload = {
   projectId: string
 }
 
+// ============ Pre-computed stats helpers ============
+
+type ParsedMessage = {
+  role: string
+  parts?: Array<{
+    type: string
+    input?: {
+      file_path?: string
+      old_string?: string
+      new_string?: string
+      content?: string
+    }
+    output?: unknown
+    text?: string
+  }>
+}
+
+interface FileStatsResult {
+  additions: number
+  deletions: number
+  fileCount: number
+}
+
+/**
+ * Compute file change stats from parsed messages.
+ * Tracks Edit/Write tool calls and calculates line additions/deletions/file count.
+ */
+function computeFileStats(messagesJson: string): FileStatsResult | null {
+  if (!messagesJson || messagesJson === "[]") return null
+
+  try {
+    const messages = JSON.parse(messagesJson) as ParsedMessage[]
+    const fileStates = new Map<string, { originalContent: string | null; currentContent: string }>()
+
+    for (const msg of messages) {
+      if (msg.role !== "assistant") continue
+      for (const part of msg.parts || []) {
+        if (part.type === "tool-Edit" || part.type === "tool-Write") {
+          const filePath = part.input?.file_path
+          if (!filePath) continue
+          if (filePath.includes("claude-sessions") || filePath.includes("Application Support")) continue
+
+          const oldString = part.input?.old_string || ""
+          const newString = part.input?.new_string || part.input?.content || ""
+
+          const existing = fileStates.get(filePath)
+          if (existing) {
+            existing.currentContent = newString
+          } else {
+            fileStates.set(filePath, {
+              originalContent: part.type === "tool-Write" ? null : oldString,
+              currentContent: newString,
+            })
+          }
+        }
+      }
+    }
+
+    let additions = 0
+    let deletions = 0
+    let fileCount = 0
+
+    for (const [, state] of fileStates) {
+      const original = state.originalContent || ""
+      if (original === state.currentContent) continue
+
+      const oldLines = original ? original.split("\n").length : 0
+      const newLines = state.currentContent ? state.currentContent.split("\n").length : 0
+
+      if (!original) {
+        additions += newLines
+      } else {
+        additions += newLines
+        deletions += oldLines
+      }
+      fileCount += 1
+    }
+
+    if (fileCount === 0) return null
+    return { additions, deletions, fileCount }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Check if a plan-mode sub-chat has a completed ExitPlanMode tool call
+ * (meaning the plan is awaiting user approval).
+ * Must match the logic in active-chat.tsx hasUnapprovedPlan.
+ */
+function computeHasPendingPlan(messagesJson: string, mode: string): boolean {
+  if (mode !== "plan") return false
+  if (!messagesJson || messagesJson === "[]") return false
+
+  try {
+    const messages = JSON.parse(messagesJson) as ParsedMessage[]
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (!msg) continue
+
+      if (msg.role === "assistant" && msg.parts) {
+        const exitPlanPart = msg.parts.find((p) => p.type === "tool-ExitPlanMode")
+        if (exitPlanPart && exitPlanPart.output !== undefined) {
+          return true
+        }
+      }
+    }
+
+    return false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Compute message count from JSON string (avoids JSON.parse in renderer just to count)
+ */
+function computeMessageCount(messagesJson: string): number {
+  if (!messagesJson || messagesJson === "[]") return 0
+  try {
+    const parsed = JSON.parse(messagesJson)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
+}
+
 function sendWorktreeSetupFailure(
   windowId: number | null,
   payload: WorktreeSetupFailurePayload,
@@ -258,9 +386,23 @@ export const chatsRouter = router({
       const chat = db.select().from(chats).where(eq(chats.id, input.id)).get()
       if (!chat) return null
 
-      // Only get non-archived sub-chats
+      // Only get non-archived sub-chats — EXCLUDE messages to avoid heavy JSON transfer on workspace switch
+      // Messages are loaded on-demand via getSubChatMessages for the active sub-chat only
       const chatSubChats = db
-        .select()
+        .select({
+          id: subChats.id,
+          name: subChats.name,
+          chatId: subChats.chatId,
+          sessionId: subChats.sessionId,
+          streamId: subChats.streamId,
+          mode: subChats.mode,
+          fileStats: subChats.fileStats,
+          hasPendingPlan: subChats.hasPendingPlan,
+          messageCount: subChats.messageCount,
+          createdAt: subChats.createdAt,
+          updatedAt: subChats.updatedAt,
+          archivedAt: subChats.archivedAt,
+        })
         .from(subChats)
         .where(and(eq(subChats.chatId, input.id), isNull(subChats.archivedAt)))
         .orderBy(subChats.createdAt)
@@ -712,6 +854,40 @@ export const chatsRouter = router({
     }),
 
   /**
+   * Get messages for a single sub-chat (lazy-load on demand)
+   * This avoids loading all sub-chat messages on workspace switch
+   */
+  getSubChatMessages: publicProcedure
+    .input(z.object({ id: z.string() }))
+    .query(({ input }) => {
+      const db = getDatabase()
+      const row = db
+        .select({ messages: subChats.messages })
+        .from(subChats)
+        .where(eq(subChats.id, input.id))
+        .get()
+      return row?.messages ?? "[]"
+    }),
+
+  // Batch version: load messages for multiple sub-chats at once (for tabsToRender)
+  getSubChatMessagesBatch: publicProcedure
+    .input(z.object({ ids: z.array(z.string()).max(5) }))
+    .query(({ input }) => {
+      const db = getDatabase()
+      if (input.ids.length === 0) return {}
+      const rows = db
+        .select({ id: subChats.id, messages: subChats.messages })
+        .from(subChats)
+        .where(inArray(subChats.id, input.ids))
+        .all()
+      const result: Record<string, string> = {}
+      for (const row of rows) {
+        result[row.id] = row.messages ?? "[]"
+      }
+      return result
+    }),
+
+  /**
    * List archived sub-chats for a chat
    */
   listArchivedSubChats: publicProcedure
@@ -838,13 +1014,17 @@ export const chatsRouter = router({
       }
 
       // 7. Insert new sub-chat with sessionId from original (needed for resume)
+      const forkedMessagesJson = JSON.stringify(forkedMessages)
       const newSubChat = db
         .insert(subChats)
         .values({
           chatId: sourceSubChat.chatId,
           name: forkName,
           mode: sourceSubChat.mode,
-          messages: JSON.stringify(forkedMessages),
+          messages: forkedMessagesJson,
+          fileStats: (() => { const s = computeFileStats(forkedMessagesJson); return s ? JSON.stringify(s) : null })(),
+          hasPendingPlan: computeHasPendingPlan(forkedMessagesJson, sourceSubChat.mode),
+          messageCount: forkedMessages.length,
           sessionId: sourceSubChat.sessionId,
         })
         .returning()
@@ -885,7 +1065,7 @@ export const chatsRouter = router({
             }
           }
           db.update(subChats)
-            .set({ messages: JSON.stringify(forkedMessages) })
+            .set({ messages: JSON.stringify(forkedMessages), messageCount: forkedMessages.length })
             .where(eq(subChats.id, newSubChat.id))
             .run()
         }
@@ -901,15 +1081,34 @@ export const chatsRouter = router({
     }),
 
   /**
-   * Update sub-chat messages
+   * Update sub-chat messages (also pre-computes file_stats and has_pending_plan)
    */
   updateSubChatMessages: publicProcedure
     .input(z.object({ id: z.string(), messages: z.string() }))
     .mutation(({ input }) => {
       const db = getDatabase()
+
+      // Get current sub-chat to know mode for has_pending_plan computation
+      const existing = db
+        .select({ mode: subChats.mode })
+        .from(subChats)
+        .where(eq(subChats.id, input.id))
+        .get()
+
+      const mode = existing?.mode || "agent"
+      const fileStats = computeFileStats(input.messages)
+      const hasPendingPlan = computeHasPendingPlan(input.messages, mode)
+      const messageCount = computeMessageCount(input.messages)
+
       return db
         .update(subChats)
-        .set({ messages: input.messages, updatedAt: new Date() })
+        .set({
+          messages: input.messages,
+          fileStats: fileStats ? JSON.stringify(fileStats) : null,
+          hasPendingPlan,
+          messageCount,
+          updatedAt: new Date(),
+        })
         .where(eq(subChats.id, input.id))
         .returning()
         .get()
@@ -988,10 +1187,14 @@ export const chatsRouter = router({
         }
       })
 
-      // 6. Update the sub-chat with truncated messages
+      // 6. Update the sub-chat with truncated messages (recompute pre-computed stats)
+      const truncatedMessagesJson = JSON.stringify(truncatedMessages)
       db.update(subChats)
         .set({
-          messages: JSON.stringify(truncatedMessages),
+          messages: truncatedMessagesJson,
+          fileStats: (() => { const s = computeFileStats(truncatedMessagesJson); return s ? JSON.stringify(s) : null })(),
+          hasPendingPlan: computeHasPendingPlan(truncatedMessagesJson, subChat.mode),
+          messageCount: truncatedMessages.length,
           updatedAt: new Date(),
         })
         .where(eq(subChats.id, input.subChatId))
@@ -1020,15 +1223,20 @@ export const chatsRouter = router({
     }),
 
   /**
-   * Update sub-chat mode
+   * Update sub-chat mode (also clears has_pending_plan when switching to agent)
    */
   updateSubChatMode: publicProcedure
     .input(z.object({ id: z.string(), mode: z.enum(["plan", "agent"]) }))
     .mutation(({ input }) => {
       const db = getDatabase()
+      // When switching to agent mode, plan is approved - clear pending flag
+      const updates: Record<string, any> = { mode: input.mode }
+      if (input.mode === "agent") {
+        updates.hasPendingPlan = false
+      }
       return db
         .update(subChats)
-        .set({ mode: input.mode })
+        .set(updates)
         .where(eq(subChats.id, input.id))
         .returning()
         .get()
@@ -1656,7 +1864,8 @@ export const chatsRouter = router({
 
   /**
    * Get file change stats for workspaces
-   * Parses messages from specified sub-chats and aggregates Edit/Write tool calls
+   * Uses pre-computed file_stats column from sub_chats table (O(1) per sub-chat).
+   * Falls back to parsing messages JSON only for sub-chats without pre-computed stats (backfill gap).
    * Supports two modes:
    * - openSubChatIds: query specific sub-chats (used by main sidebar)
    * - chatIds: query all sub-chats for given chats (used by archive popover)
@@ -1675,25 +1884,20 @@ export const chatsRouter = router({
       return []
     }
 
-    // Query sub-chats based on input mode
-    let allChats: Array<{ chatId: string | null; subChatId: string; messages: string | null }>
+    // Query sub-chats based on input mode - now includes file_stats column
+    let allChats: Array<{ chatId: string | null; subChatId: string; fileStats: string | null; messages: string | null }>
 
     if (input.chatIds && input.chatIds.length > 0) {
       // Archive mode: query all sub-chats for given chat IDs
-      // Pre-filter with LIKE to skip sub-chats without file edits (avoids loading/parsing large JSON)
       allChats = db
         .select({
           chatId: subChats.chatId,
           subChatId: subChats.id,
+          fileStats: subChats.fileStats,
           messages: subChats.messages,
         })
         .from(subChats)
-        .where(
-          and(
-            inArray(subChats.chatId, input.chatIds),
-            sql`(${subChats.messages} LIKE '%tool-Edit%' OR ${subChats.messages} LIKE '%tool-Write%')`
-          )
-        )
+        .where(inArray(subChats.chatId, input.chatIds))
         .all()
     } else {
       // Main sidebar mode: query specific sub-chats
@@ -1701,6 +1905,7 @@ export const chatsRouter = router({
         .select({
           chatId: subChats.chatId,
           subChatId: subChats.id,
+          fileStats: subChats.fileStats,
           messages: subChats.messages,
         })
         .from(subChats)
@@ -1708,100 +1913,45 @@ export const chatsRouter = router({
         .all()
     }
 
-    // Aggregate stats per workspace (chatId)
+    // Aggregate stats per workspace (chatId) - using pre-computed column when available
     const statsMap = new Map<
       string,
       { additions: number; deletions: number; fileCount: number }
     >()
 
     for (const row of allChats) {
-      if (!row.messages || !row.chatId) continue
-      const chatId = row.chatId // TypeScript narrowing
+      if (!row.chatId) continue
+      const chatId = row.chatId
+
+      // Fast path: use pre-computed stats column
+      if (row.fileStats) {
+        try {
+          const stats = JSON.parse(row.fileStats) as FileStatsResult
+          if (stats.fileCount > 0) {
+            const existing = statsMap.get(chatId) || { additions: 0, deletions: 0, fileCount: 0 }
+            existing.additions += stats.additions
+            existing.deletions += stats.deletions
+            existing.fileCount += stats.fileCount
+            statsMap.set(chatId, existing)
+          }
+          continue
+        } catch {
+          // Fall through to slow path if JSON is invalid
+        }
+      }
+
+      // Slow path: compute from messages (for backfill gap or corrupted stats)
+      if (!row.messages) continue
 
       try {
-        const messages = JSON.parse(row.messages) as Array<{
-          role: string
-          parts?: Array<{
-            type: string
-            input?: {
-              file_path?: string
-              old_string?: string
-              new_string?: string
-              content?: string
-            }
-          }>
-        }>
-
-        // Track file states for this sub-chat
-        const fileStates = new Map<
-          string,
-          { originalContent: string | null; currentContent: string }
-        >()
-
-        for (const msg of messages) {
-          if (msg.role !== "assistant") continue
-          for (const part of msg.parts || []) {
-            if (part.type === "tool-Edit" || part.type === "tool-Write") {
-              const filePath = part.input?.file_path
-              if (!filePath) continue
-              // Skip session files
-              if (
-                filePath.includes("claude-sessions") ||
-                filePath.includes("Application Support")
-              )
-                continue
-
-              const oldString = part.input?.old_string || ""
-              const newString =
-                part.input?.new_string || part.input?.content || ""
-
-              const existing = fileStates.get(filePath)
-              if (existing) {
-                existing.currentContent = newString
-              } else {
-                fileStates.set(filePath, {
-                  originalContent: part.type === "tool-Write" ? null : oldString,
-                  currentContent: newString,
-                })
-              }
-            }
-          }
+        const stats = computeFileStats(row.messages)
+        if (stats && stats.fileCount > 0) {
+          const existing = statsMap.get(chatId) || { additions: 0, deletions: 0, fileCount: 0 }
+          existing.additions += stats.additions
+          existing.deletions += stats.deletions
+          existing.fileCount += stats.fileCount
+          statsMap.set(chatId, existing)
         }
-
-        // Calculate stats for this sub-chat and add to workspace total
-        let subChatAdditions = 0
-        let subChatDeletions = 0
-        let subChatFileCount = 0
-
-        for (const [, state] of fileStates) {
-          const original = state.originalContent || ""
-          if (original === state.currentContent) continue
-
-          const oldLines = original ? original.split("\n").length : 0
-          const newLines = state.currentContent
-            ? state.currentContent.split("\n").length
-            : 0
-
-          if (!original) {
-            // New file
-            subChatAdditions += newLines
-          } else {
-            subChatAdditions += newLines
-            subChatDeletions += oldLines
-          }
-          subChatFileCount += 1
-        }
-
-        // Add to workspace total
-        const existing = statsMap.get(chatId) || {
-          additions: 0,
-          deletions: 0,
-          fileCount: 0,
-        }
-        existing.additions += subChatAdditions
-        existing.deletions += subChatDeletions
-        existing.fileCount += subChatFileCount
-        statsMap.set(chatId, existing)
       } catch {
         // Skip invalid JSON
       }
@@ -1816,7 +1966,8 @@ export const chatsRouter = router({
 
   /**
    * Get sub-chats with pending plan approvals
-   * Uses mode field as source of truth: mode="plan" + completed ExitPlanMode = pending approval
+   * Uses pre-computed has_pending_plan column (O(1) per sub-chat).
+   * Falls back to parsing messages JSON only for sub-chats without pre-computed stats (backfill gap).
    * Logic must match active-chat.tsx hasUnapprovedPlan
    * REQUIRES openSubChatIds to avoid loading all sub-chats (performance optimization)
    */
@@ -1830,12 +1981,13 @@ export const chatsRouter = router({
       return []
     }
 
-    // Query only the specified sub-chats, including mode for filtering
+    // Query only the specified sub-chats - now includes has_pending_plan column
     const allSubChats = db
       .select({
         chatId: subChats.chatId,
         subChatId: subChats.id,
         mode: subChats.mode,
+        hasPendingPlan: subChats.hasPendingPlan,
         messages: subChats.messages,
       })
       .from(subChats)
@@ -1850,41 +2002,22 @@ export const chatsRouter = router({
       // If mode is "agent", plan is already approved - skip
       if (row.mode === "agent") continue
 
-      // Only check for ExitPlanMode in plan mode sub-chats
+      // Fast path: use pre-computed has_pending_plan column
+      if (row.hasPendingPlan !== null && row.hasPendingPlan !== undefined) {
+        if (row.hasPendingPlan) {
+          pendingApprovals.push({
+            subChatId: row.subChatId,
+            chatId: row.chatId,
+          })
+        }
+        continue
+      }
+
+      // Slow path: compute from messages (for backfill gap)
       if (!row.messages) continue
 
       try {
-        const messages = JSON.parse(row.messages) as Array<{
-          role: string
-          content?: string
-          parts?: Array<{
-            type: string
-            text?: string
-            output?: unknown
-          }>
-        }>
-
-        // Check if there's a completed ExitPlanMode in messages
-        const hasCompletedExitPlanMode = (): boolean => {
-          for (let i = messages.length - 1; i >= 0; i--) {
-            const msg = messages[i]
-            if (!msg) continue
-
-            // If assistant message with completed ExitPlanMode, we found an unapproved plan
-            if (msg.role === "assistant" && msg.parts) {
-              const exitPlanPart = msg.parts.find(
-                (p) => p.type === "tool-ExitPlanMode"
-              )
-              // Check if ExitPlanMode is completed (has output, even if empty)
-              if (exitPlanPart && exitPlanPart.output !== undefined) {
-                return true
-              }
-            }
-          }
-          return false
-        }
-
-        if (hasCompletedExitPlanMode()) {
+        if (computeHasPendingPlan(row.messages, row.mode)) {
           pendingApprovals.push({
             subChatId: row.subChatId,
             chatId: row.chatId,
