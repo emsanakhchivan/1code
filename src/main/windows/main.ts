@@ -656,6 +656,7 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
       sandbox: false, // Required for electron-trpc
       webSecurity: true,
       partition: "persist:main", // Use persistent session for cookies
+      backgroundThrottling: false, // Prevent JS timer throttling when minimized — keeps streaming/agents responsive
     },
   })
 
@@ -879,7 +880,7 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
     const exitCode = details.exitCode ?? -1
     console.error(`[Main] Crash reason: ${crashReason}, exit code: ${exitCode}`)
 
-    // Don't spam notifications if multiple crashes happen quickly
+    // Don't spam notifications/reloads if multiple crashes happen quickly
     if (crashNotificationShown) return
     crashNotificationShown = true
 
@@ -888,20 +889,34 @@ export function createWindow(options?: { chatId?: string; subChatId?: string }):
       crashNotificationShown = false
     }, 10000)
 
-    // Show notification about the crash
+    // AUTO-RECOVER: Reload the window to restore the UI.
+    // Agents run in the main process and survive renderer crashes.
+    // Delay slightly to let crash state settle before reloading.
+    if (!window.isDestroyed()) {
+      setTimeout(() => {
+        try {
+          console.log("[Main] Auto-reloading window after renderer crash")
+          window.reload()
+        } catch (e) {
+          console.error("[Main] Failed to reload after crash:", e)
+        }
+      }, 500)
+    }
+
+    // Show notification so user knows what happened
     try {
       const notification = new Notification({
-        title: "1Code Renderer Crashed",
-        body: `Reason: ${crashReason}. Your agents are still running. Click to reload.`,
+        title: "1Code recovered from a crash",
+        body: `Reason: ${crashReason}. The window was reloaded. Your agents are still running.`,
         ...(process.platform !== "darwin" && {
           icon: nativeImage.createFromPath(join(__dirname, "../../build/icon.ico")),
         }),
       })
 
       notification.on("click", () => {
-        // Reload the window on notification click
+        // Focus window on notification click (already reloaded)
         if (!window.isDestroyed()) {
-          window.reload()
+          window.focus()
         }
       })
 

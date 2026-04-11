@@ -1795,7 +1795,11 @@ export function AgentsSidebar({
   }, [])
 
   // Fetch all local chats (no project filter)
-  const { data: localChats } = trpc.chats.list.useQuery({})
+  // staleTime prevents refetch on every re-render during workspace switch
+  const { data: localChats } = trpc.chats.list.useQuery(
+    {},
+    { staleTime: 10_000, refetchOnWindowFocus: false, placeholderData: (prev) => prev },
+  )
 
   // Fetch user's teams (same as web) - always enabled to allow merged list
   const { data: teams, isLoading: isTeamsLoading, isError: isTeamsError } = useUserTeams(true)
@@ -1939,7 +1943,10 @@ export function AgentsSidebar({
   )
 
   // Fetch all projects for git info
-  const { data: projects } = trpc.projects.list.useQuery()
+  const { data: projects } = trpc.projects.list.useQuery(
+    undefined,
+    { staleTime: 60_000, refetchOnWindowFocus: false, placeholderData: (prev) => prev },
+  )
 
   // Auto-import hook for "Open Locally" functionality
   const { getMatchingProjects, autoImport, isImporting } = useAutoImport()
@@ -1951,7 +1958,10 @@ export function AgentsSidebar({
   }, [projects])
 
   // Fetch all archived chats (to get count)
-  const { data: archivedChats } = trpc.chats.listArchived.useQuery({})
+  const { data: archivedChats } = trpc.chats.listArchived.useQuery(
+    {},
+    { staleTime: 30_000, refetchOnWindowFocus: false, placeholderData: (prev) => prev },
+  )
   const archivedChatsCount = archivedChats?.length ?? 0
 
   // Get utils outside of callbacks - hooks must be called at top level

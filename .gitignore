@@ -7,6 +7,13 @@ release/
 release-*/
 out/
 
+# VSCode extension build outputs
+packages/vscode-extension/dist/
+packages/vscode-extension/webview-dist/
+packages/vscode-extension/node_modules/
+packages/core/dist/
+packages/core/node_modules/
+
 # IDE
 .idea/
 *.swp
