@@ -470,7 +470,7 @@ const AgentChatItem = React.memo(function AgentChatItem({
   chatId: string
   chatName: string | null
   chatBranch: string | null
-  chatUpdatedAt: Date | null
+  chatUpdatedAt: Date | string | null
   chatProjectId: string
   globalIndex: number
   isSelected: boolean
@@ -686,7 +686,7 @@ const AgentChatItem = React.memo(function AgentChatItem({
                   )}
                   <span>
                     {formatTime(
-                      chatUpdatedAt?.toISOString() ?? new Date().toISOString(),
+                      (chatUpdatedAt instanceof Date ? chatUpdatedAt?.toISOString() : chatUpdatedAt) ?? new Date().toISOString(),
                     )}
                   </span>
                 </div>
@@ -1817,9 +1817,9 @@ export function AgentsSidebar({
     const unified: Array<{
       id: string
       name: string | null
-      createdAt: Date | null
-      updatedAt: Date | null
-      archivedAt: Date | null
+      createdAt: Date | string | null
+      updatedAt: Date | string | null
+      archivedAt: Date | string | null
       projectId: string | null
       worktreePath: string | null
       branch: string | null
@@ -1877,8 +1877,8 @@ export function AgentsSidebar({
 
     // Sort by updatedAt descending (newest first)
     unified.sort((a, b) => {
-      const aTime = a.updatedAt?.getTime() ?? 0
-      const bTime = b.updatedAt?.getTime() ?? 0
+      const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+      const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
       return bTime - aTime
     })
 

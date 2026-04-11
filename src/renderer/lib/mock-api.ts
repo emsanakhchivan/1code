@@ -187,8 +187,19 @@ export const api = {
       useQuery: (_args?: AnyObj, _opts?: AnyObj) => {
         // Use real tRPC
         const result = trpc.chats.list.useQuery({})
+        // Ensure Date objects from Drizzle/superjson are converted to ISO strings
+        const serialized = useMemo(() => {
+          if (!result.data) return []
+          const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
+          return result.data.map((chat: AnyObj) => ({
+            ...chat,
+            createdAt: serializeDate(chat.createdAt),
+            updatedAt: serializeDate(chat.updatedAt),
+            archivedAt: serializeDate(chat.archivedAt),
+          }))
+        }, [result.data])
         return {
-          data: result.data ?? [],
+          data: serialized,
           isLoading: result.isLoading,
         }
       },
@@ -210,24 +221,43 @@ export const api = {
         // via getSubChatMessages to avoid JSON.parse on ALL sub-chats during workspace switch
         const transformedData = useMemo(() => {
           if (!result.data) return null
+          const d = result.data
+          // Ensure Date objects from Drizzle/superjson are converted to ISO strings
+          // to prevent "Objects are not valid as a React child" errors in production
+          const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
           return {
-            ...result.data,
+            ...d,
+            createdAt: serializeDate(d.createdAt),
+            updatedAt: serializeDate(d.updatedAt),
+            archivedAt: serializeDate(d.archivedAt),
+            // Also serialize project dates if present
+            project: d.project ? {
+              ...d.project,
+              createdAt: serializeDate(d.project.createdAt),
+              updatedAt: serializeDate(d.project.updatedAt),
+            } : null,
             // Desktop uses worktrees, not sandboxes
             sandbox_id: null,
             meta: null,
             // Map subChats to expected format WITHOUT parsing messages
-            subChats: result.data.subChats?.map((sc: AnyObj) => {
-              return {
-                ...sc,
-                created_at: sc.createdAt,
-                updated_at: sc.updatedAt,
-                // messages may be a JSON string (from cache update after streaming) or undefined
-                // Leave as-is; parseMessagesSync handles both cases lazily
-                messages: sc.messages || null,
-                stream_id: null,
-                messageCount: sc.messageCount ?? 0,
-              }
-            }),
+            subChats: d.subChats?.map((sc: AnyObj) => ({
+              id: sc.id,
+              name: sc.name,
+              chatId: sc.chatId,
+              sessionId: sc.sessionId,
+              streamId: sc.streamId,
+              mode: sc.mode,
+              fileStats: sc.fileStats,
+              hasPendingPlan: sc.hasPendingPlan,
+              messageCount: sc.messageCount ?? 0,
+              created_at: serializeDate(sc.createdAt),
+              updated_at: serializeDate(sc.updatedAt),
+              archived_at: serializeDate(sc.archivedAt),
+              // messages may be a JSON string (from cache update after streaming) or undefined
+              // Leave as-is; parseMessagesSync handles both cases lazily
+              messages: sc.messages || null,
+              stream_id: null,
+            })),
           }
         }, [result.data])
 
@@ -240,8 +270,18 @@ export const api = {
     getArchivedChats: {
       useQuery: (_args?: AnyObj, _opts?: AnyObj) => {
         const result = trpc.chats.listArchived.useQuery({})
+        const serialized = useMemo(() => {
+          if (!result.data) return []
+          const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
+          return result.data.map((chat: AnyObj) => ({
+            ...chat,
+            createdAt: serializeDate(chat.createdAt),
+            updatedAt: serializeDate(chat.updatedAt),
+            archivedAt: serializeDate(chat.archivedAt),
+          }))
+        }, [result.data])
         return {
-          data: result.data ?? [],
+          data: serialized,
           isLoading: result.isLoading,
         }
       },

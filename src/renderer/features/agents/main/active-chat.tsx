@@ -4028,7 +4028,7 @@ const ChatViewInner = memo(function ChatViewInner({
 
     // Optimistic update: immediately update chat's updated_at and resort array for instant sidebar resorting
     if (teamId) {
-      const now = new Date()
+      const now = new Date().toISOString()
       utils.agents.getAgentChats.setData({ teamId }, (old: any) => {
         if (!old) return old
         // Update the timestamp and sort by updated_at descending
@@ -5499,8 +5499,8 @@ export function ChatView({
     id: string
     name?: string | null
     mode?: "plan" | "agent" | null
-    created_at?: Date | string | null
-    updated_at?: Date | string | null
+    created_at?: string | null
+    updated_at?: string | null
     messages?: any
     stream_id?: string | null
     messageCount?: number
@@ -7517,12 +7517,12 @@ Make sure to preserve all functionality from both branches when resolving confli
                   {
                     id: subChatIdToUpdate,
                     name,
-                    created_at: new Date(),
-                    updated_at: new Date(),
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
                     messages: "[]",
                     mode: "agent",
                     stream_id: null,
-                    chat_id: chatId,
+                    chatId: chatId,
                   },
                 ],
               }
