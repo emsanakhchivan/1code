@@ -3,7 +3,7 @@
  * Wraps real tRPC calls and provides stubs for web-only features
  */
 
-import { useMemo } from "react"
+import { useMemo, useRef } from "react"
 import { normalizeCodexToolPart } from "../../shared/codex-tool-normalizer"
 import { trpc, trpcClient } from "./trpc"
 
@@ -11,6 +11,35 @@ import { trpc, trpcClient } from "./trpc"
 type AnyFn = (...args: any[]) => any
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyObj = Record<string, any>
+
+/**
+ * Stabilize data reference to prevent infinite re-renders.
+ * React Query with superjson may return new Date objects on each refetch,
+ * causing structural sharing to fail and result.data to get a new reference
+ * even when the underlying data hasn't changed.
+ *
+ * This hook returns a stable reference to the input as long as a lightweight
+ * serialization of it hasn't changed. Used as the dependency for useMemo
+ * transforms so they only recompute when data actually changes.
+ */
+function useStabilizedRef<T>(input: T | undefined, serialize: (data: T) => string): T | undefined {
+  const prevRef = useRef<{ raw: T | undefined; serialized: string }>({
+    raw: undefined,
+    serialized: "",
+  })
+
+  if (!input) return undefined
+
+  const serialized = serialize(input)
+  if (serialized === prevRef.current.serialized) {
+    // Same data — return previous raw reference to preserve identity
+    return prevRef.current.raw
+  }
+
+  // Data actually changed — update ref and return new input
+  prevRef.current = { raw: input, serialized }
+  return input
+}
 
 // Message parse cache - prevents re-parsing same messages across renders
 const messageParseCache = new Map<string, AnyObj[]>()
@@ -188,16 +217,22 @@ export const api = {
         // Use real tRPC
         const result = trpc.chats.list.useQuery({})
         // Ensure Date objects from Drizzle/superjson are converted to ISO strings
+        // Use stabilized ref to prevent infinite re-renders when result.data
+        // gets a new reference but contains the same data (common with superjson Date deserialization)
+        const stableData = useStabilizedRef(
+          result.data,
+          (data) => JSON.stringify(data.map((c: AnyObj) => [c.id, String(c.updatedAt)])),
+        )
         const serialized = useMemo(() => {
-          if (!result.data) return []
+          if (!stableData) return []
           const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
-          return result.data.map((chat: AnyObj) => ({
+          return stableData.map((chat: AnyObj) => ({
             ...chat,
             createdAt: serializeDate(chat.createdAt),
             updatedAt: serializeDate(chat.updatedAt),
             archivedAt: serializeDate(chat.archivedAt),
           }))
-        }, [result.data])
+        }, [stableData])
         return {
           data: serialized,
           isLoading: result.isLoading,
@@ -219,11 +254,15 @@ export const api = {
 
         // Lightweight transformation: messages are loaded on-demand per sub-chat
         // via getSubChatMessages to avoid JSON.parse on ALL sub-chats during workspace switch
+        // Use stabilized ref to prevent infinite re-renders when result.data
+        // gets a new reference but contains the same data (common with superjson Date deserialization)
+        const stableData = useStabilizedRef(
+          result.data,
+          (d) => JSON.stringify([d.id, String(d.updatedAt), d.subChats?.map((sc: AnyObj) => [sc.id, sc.updatedAt])]),
+        )
         const transformedData = useMemo(() => {
-          if (!result.data) return null
-          const d = result.data
-          // Ensure Date objects from Drizzle/superjson are converted to ISO strings
-          // to prevent "Objects are not valid as a React child" errors in production
+          if (!stableData) return null
+          const d = stableData
           const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
           return {
             ...d,
@@ -259,7 +298,7 @@ export const api = {
               stream_id: null,
             })),
           }
-        }, [result.data])
+        }, [stableData])
 
         return {
           data: transformedData,
@@ -270,16 +309,20 @@ export const api = {
     getArchivedChats: {
       useQuery: (_args?: AnyObj, _opts?: AnyObj) => {
         const result = trpc.chats.listArchived.useQuery({})
+        const stableData = useStabilizedRef(
+          result.data,
+          (data) => JSON.stringify(data.map((c: AnyObj) => [c.id, String(c.updatedAt)])),
+        )
         const serialized = useMemo(() => {
-          if (!result.data) return []
+          if (!stableData) return []
           const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
-          return result.data.map((chat: AnyObj) => ({
+          return stableData.map((chat: AnyObj) => ({
             ...chat,
             createdAt: serializeDate(chat.createdAt),
             updatedAt: serializeDate(chat.updatedAt),
             archivedAt: serializeDate(chat.archivedAt),
           }))
-        }, [result.data])
+        }, [stableData])
         return {
           data: serialized,
           isLoading: result.isLoading,
