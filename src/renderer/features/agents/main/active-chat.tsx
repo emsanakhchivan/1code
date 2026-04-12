@@ -53,13 +53,15 @@ import { AnimatePresence, motion } from "motion/react"
 import {
   createContext,
   memo,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  useTransition
 } from "react"
 import { flushSync } from "react-dom"
 import { toast } from "sonner"
@@ -6676,9 +6678,11 @@ Make sure to preserve all functionality from both branches when resolving confli
         if (!overrideProvider) {
           // Check if cached Chat has 0 messages but lazy-load now has data
           const existingMsgCount = Array.isArray((existing as any)?.messages) ? (existing as any).messages.length : 0
-          if (existingMsgCount === 0 && messagesBySubChatIdRef.current.has(subChatId)) {
+          const lazyMessages = messagesBySubChatIdRef.current.get(subChatId)
+          // Only evict if lazy-load has MORE messages than the cached Chat
+          // This prevents infinite loop when both have empty messages (new chat case)
+          if (existingMsgCount === 0 && lazyMessages && lazyMessages.length > 0) {
             // Evict the empty Chat so it's recreated with messages below.
-            // Guard against infinite loop: only evict if we have actual messages.
             agentChatStore.delete(subChatId)
           } else {
             return existing
@@ -6896,7 +6900,7 @@ Make sure to preserve all functionality from both branches when resolving confli
       // Store streamId at creation time to prevent resume during active streaming
       // tRPC refetch would update stream_id in DB, but store stays stable
       agentChatStore.setStreamId(subChatId, subChat?.stream_id || null)
-      forceUpdate({}) // Trigger re-render to use new chat
+      // No forceUpdate needed - store subscription triggers re-render via Zustand's useShallow
       return newChat
     },
     [
@@ -6940,7 +6944,7 @@ Make sure to preserve all functionality from both branches when resolving confli
 
       // Force transport recreation with the newly selected provider.
       agentChatStore.delete(subChatId)
-      forceUpdate({})
+      // No forceUpdate needed - store deletion triggers re-render via Zustand's useShallow
     },
     [agentSubChatsWithMessages],
   )

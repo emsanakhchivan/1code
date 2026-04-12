@@ -3,7 +3,7 @@
  * Wraps real tRPC calls and provides stubs for web-only features
  */
 
-import { useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, startTransition, useState, useTransition } from "react"
 import { normalizeCodexToolPart } from "../../shared/codex-tool-normalizer"
 import { trpc, trpcClient } from "./trpc"
 
@@ -18,27 +18,18 @@ type AnyObj = Record<string, any>
  * causing structural sharing to fail and result.data to get a new reference
  * even when the underlying data hasn't changed.
  *
- * This hook returns a stable reference to the input as long as a lightweight
- * serialization of it hasn't changed. Used as the dependency for useMemo
- * transforms so they only recompute when data actually changes.
+ * Returns a stable string key that only changes when the serialized data
+ * actually changes. The key is stored in a ref so it keeps the same identity
+ * across renders when the data hasn't changed, making it safe as a useMemo dep.
  */
-function useStabilizedRef<T>(input: T | undefined, serialize: (data: T) => string): T | undefined {
-  const prevRef = useRef<{ raw: T | undefined; serialized: string }>({
-    raw: undefined,
-    serialized: "",
-  })
-
-  if (!input) return undefined
-
-  const serialized = serialize(input)
-  if (serialized === prevRef.current.serialized) {
-    // Same data — return previous raw reference to preserve identity
-    return prevRef.current.raw
+function useStableKey<T>(input: T | undefined, serialize: (data: T) => string): string {
+  const serialized = input ? serialize(input) : ""
+  const prevRef = useRef(serialized)
+  // Only update the key when the serialized value actually changes
+  if (serialized !== prevRef.current) {
+    prevRef.current = serialized
   }
-
-  // Data actually changed — update ref and return new input
-  prevRef.current = { raw: input, serialized }
-  return input
+  return prevRef.current
 }
 
 // Message parse cache - prevents re-parsing same messages across renders
@@ -217,22 +208,23 @@ export const api = {
         // Use real tRPC
         const result = trpc.chats.list.useQuery({})
         // Ensure Date objects from Drizzle/superjson are converted to ISO strings
-        // Use stabilized ref to prevent infinite re-renders when result.data
+        // Use stable key to prevent infinite re-renders when result.data
         // gets a new reference but contains the same data (common with superjson Date deserialization)
-        const stableData = useStabilizedRef(
+        const dataKey = useStableKey(
           result.data,
           (data) => JSON.stringify(data.map((c: AnyObj) => [c.id, String(c.updatedAt)])),
         )
         const serialized = useMemo(() => {
-          if (!stableData) return []
+          if (!result.data) return []
           const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
-          return stableData.map((chat: AnyObj) => ({
+          return result.data.map((chat: AnyObj) => ({
             ...chat,
             createdAt: serializeDate(chat.createdAt),
             updatedAt: serializeDate(chat.updatedAt),
             archivedAt: serializeDate(chat.archivedAt),
           }))
-        }, [stableData])
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [dataKey])
         return {
           data: serialized,
           isLoading: result.isLoading,
@@ -254,15 +246,15 @@ export const api = {
 
         // Lightweight transformation: messages are loaded on-demand per sub-chat
         // via getSubChatMessages to avoid JSON.parse on ALL sub-chats during workspace switch
-        // Use stabilized ref to prevent infinite re-renders when result.data
+        // Use stable key to prevent infinite re-renders when result.data
         // gets a new reference but contains the same data (common with superjson Date deserialization)
-        const stableData = useStabilizedRef(
-          result.data,
-          (d) => JSON.stringify([d.id, String(d.updatedAt), d.subChats?.map((sc: AnyObj) => [sc.id, sc.updatedAt])]),
+        const dataKey = useStableKey(
+          result.data as AnyObj | undefined,
+          (d: AnyObj) => JSON.stringify([d.id, String(d.updatedAt), d.subChats?.map((sc: AnyObj) => [sc.id, sc.updatedAt])]),
         )
         const transformedData = useMemo(() => {
-          if (!stableData) return null
-          const d = stableData
+          if (!result.data) return null
+          const d = result.data
           const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
           return {
             ...d,
@@ -298,7 +290,8 @@ export const api = {
               stream_id: null,
             })),
           }
-        }, [stableData])
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [dataKey])
 
         return {
           data: transformedData,
@@ -309,20 +302,21 @@ export const api = {
     getArchivedChats: {
       useQuery: (_args?: AnyObj, _opts?: AnyObj) => {
         const result = trpc.chats.listArchived.useQuery({})
-        const stableData = useStabilizedRef(
+        const dataKey = useStableKey(
           result.data,
           (data) => JSON.stringify(data.map((c: AnyObj) => [c.id, String(c.updatedAt)])),
         )
         const serialized = useMemo(() => {
-          if (!stableData) return []
+          if (!result.data) return []
           const serializeDate = (v: unknown) => v instanceof Date ? v.toISOString() : (v as string | null | undefined)
-          return stableData.map((chat: AnyObj) => ({
+          return result.data.map((chat: AnyObj) => ({
             ...chat,
             createdAt: serializeDate(chat.createdAt),
             updatedAt: serializeDate(chat.updatedAt),
             archivedAt: serializeDate(chat.archivedAt),
           }))
-        }, [stableData])
+          // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [dataKey])
         return {
           data: serialized,
           isLoading: result.isLoading,
@@ -729,6 +723,8 @@ export const api = {
  * Uses batch endpoint to fetch messages for all tabsToRender IDs at once,
  * avoiding JSON.parse on ALL sub-chats during workspace switch while still
  * providing messages for every rendered tab (not just the active one).
+ *
+ * Uses startTransition to keep animations smooth during heavy parsing.
  */
 export function useSubChatMessagesBatch(subChatIds: string[]) {
   const result = trpc.chats.getSubChatMessagesBatch.useQuery(
@@ -740,14 +736,46 @@ export function useSubChatMessagesBatch(subChatIds: string[]) {
     },
   )
 
-  const messagesBySubChatId = useMemo(() => {
-    const map = new Map<string, AnyObj[]>()
-    if (!result.data) return map
-    for (const [id, messagesJson] of Object.entries(result.data)) {
-      map.set(id, parseAndNormalizeMessages(messagesJson))
+  // Use stable key to prevent infinite re-renders when result.data
+  // gets a new reference but contains the same data (common with superjson Date deserialization)
+  const dataKey = useStableKey(
+    result.data,
+    (data) => JSON.stringify(
+      Object.entries(data)
+        .map(([id, msgs]) => [id, msgs?.length ?? 0])
+        .sort((a, b) => a[0].localeCompare(b[0]))
+    ),
+  )
+
+  // Track previous dataKey to detect when data actually changed
+  const prevDataKeyRef = useRef<string>("")
+  // Store parsed messages - updated in startTransition to keep UI responsive
+  const [messagesBySubChatId, setMessagesMap] = useState<Map<string, AnyObj[]>>(new Map())
+  const [, startParseTransition] = useTransition()
+
+  // Parse messages in a transition when data changes
+  // This allows React to yield to paint commits (animations) during heavy parsing
+  useEffect(() => {
+    if (!result.data) {
+      setMessagesMap(new Map())
+      prevDataKeyRef.current = ""
+      return
     }
-    return map
-  }, [result.data])
+
+    // Skip if data hasn't actually changed
+    if (dataKey === prevDataKeyRef.current) return
+    prevDataKeyRef.current = dataKey
+
+    // Parse in startTransition so animations can paint during heavy work
+    startParseTransition(() => {
+      const map = new Map<string, AnyObj[]>()
+      for (const [id, messagesJson] of Object.entries(result.data!)) {
+        map.set(id, parseAndNormalizeMessages(messagesJson))
+      }
+      setMessagesMap(map)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataKey])
 
   return { messagesBySubChatId, isLoading: result.isLoading && subChatIds.length > 0 }
 }
