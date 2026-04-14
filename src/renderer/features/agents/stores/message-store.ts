@@ -5,6 +5,7 @@ import { atomFamily } from "jotai/utils"
 import { appStore } from "../../../lib/jotai-store"
 import { agentChatStore } from "./agent-chat-store"
 import { clearSubChatAtoms } from "../atoms"
+import { streamingChatIdsAtom } from "../../../lib/atoms/streaming-state"
 
 // Types
 export interface MessagePart {
@@ -78,9 +79,21 @@ export function touchChatAccess(subChatId: string) {
 }
 
 // Evict least recently used caches, protecting active/split/streaming chats
+// CRITICAL: Streaming chats must NEVER be evicted even if not viewed recently
 export function evictLeastRecentlyUsed(currentSubChatId: string, protectedIds: string[] = []) {
   const keys = Array.from(activeMessageIdsByChat.keys())
-  const keepSet = new Set([currentSubChatId, ...protectedIds])
+
+  // Get stream-active chats from global atom - these are protected
+  const streamingIds = appStore.get(streamingChatIdsAtom)
+  const viewActive = appStore.get(viewActiveChatIdAtom)
+
+  // Protected: current chat + view-active + all stream-active + explicit protected
+  const keepSet = new Set([
+    currentSubChatId,
+    viewActive,
+    ...streamingIds,
+    ...protectedIds
+  ].filter(Boolean) as string[])
 
   if (keys.length <= MAX_ACTIVE_CHATS) return
 
@@ -121,6 +134,31 @@ const messageRolesPerChatAtom = atomFamily((_subChatId: string) =>
 
 // Currently streaming message ID (null if not streaming)
 export const streamingMessageIdAtom = atom<string | null>(null)
+
+// ============================================================================
+// VIEW-ACTIVE TRACKING - State Partitioning for Performance
+// ============================================================================
+// Key optimization: Only sync view-active or stream-active chats.
+// Background tabs have sync paused to prevent cascade updates.
+//
+
+// View-active tracking: which chat the user is currently viewing
+export const viewActiveChatIdAtom = atom<string | null>(null)
+
+// Combined: check if chat should sync (view-active OR stream-active)
+// Use this to determine whether a chat needs message sync operations
+// TODO: This atom is defined for future use when viewActiveChatIdAtom is properly set.
+// Currently, sync decisions are made inline in syncMessagesWithStatusAtom using updateGlobal as fallback.
+// Once viewActiveChatIdAtom has a proper setter, this atom can be used for declarative sync checks.
+export const shouldSyncChatAtom = atomFamily((chatId: string) =>
+  atom((get) => {
+    const viewActive = get(viewActiveChatIdAtom)
+    const streamingIds = get(streamingChatIdsAtom)
+
+    // Sync if: view-active OR stream-active
+    return viewActive === chatId || streamingIds.has(chatId)
+  })
+)
 
 // Chat status atom
 export const chatStatusAtom = atom<string>("ready")
@@ -900,6 +938,23 @@ export const syncMessagesWithStatusAtom = atom(
 
     const prevSubChatId = get(currentSubChatIdAtom)
     const currentSubChatId = subChatId ?? prevSubChatId
+
+    // --- STATE PARTITIONING: Only sync view-active or stream-active chats ---
+    // Background tabs have sync paused to prevent cascade updates.
+    // This is a critical optimization to prevent hidden tabs from consuming CPU.
+    const viewActive = get(viewActiveChatIdAtom)
+    const streamingIds = get(streamingChatIdsAtom)
+
+    // Fallback: updateGlobal indicates this is called from active chat context
+    // This ensures active chats sync even when viewActiveChatIdAtom is not yet set
+    const shouldSync = updateGlobal || viewActive === currentSubChatId || streamingIds.has(currentSubChatId)
+    if (!shouldSync) {
+      // Skip sync for background chats - their queries are paused
+      // NOTE: We still return without updating atoms. The per-chat atoms will be
+      // populated when the user switches to this tab (viewActive changes).
+      return
+    }
+
     let globalIdsChanged = false
     let globalRolesChanged = false
     const messageCount = messages.length
