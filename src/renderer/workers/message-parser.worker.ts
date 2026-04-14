@@ -1,14 +1,23 @@
 // src/renderer/workers/message-parser.worker.ts
 import type { Chunk } from './chunk-queue';
 
+/**
+ * Marker for individual chunk parse errors.
+ * Included in ParseResult.parsed array when JSON.parse fails for a chunk.
+ */
+export interface ParseErrorMarker {
+  parseError: true;
+  raw: string;
+}
+
 export interface ParseTask {
-  chunks: Array<{ chatId: string; raw: string }>;
+  chunks: Omit<Chunk, 'timestamp'>[];
   chatId: string;
 }
 
 export interface ParseResult {
   chatId: string;
-  parsed: unknown[];
+  parsed: (unknown | ParseErrorMarker)[];
   timestamp: number;
 }
 
@@ -17,6 +26,9 @@ export interface ParseError {
   error: string;
   timestamp: number;
 }
+
+// Type for any message from worker
+export type WorkerMessage = ParseResult | ParseError;
 
 // Worker receives chunks, parses JSON off main thread
 self.onmessage = (event: MessageEvent<ParseTask>) => {
