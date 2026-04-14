@@ -2,7 +2,7 @@ import { z } from "zod"
 import { router, publicProcedure } from "../index"
 import { getDatabase, subChats } from "../../db"
 import { statsCache } from "../../db/schema/stats-cache"
-import { eq, inArray } from "drizzle-orm"
+import { eq, inArray, sql } from "drizzle-orm"
 
 /**
  * Stats Cache Router
@@ -94,34 +94,27 @@ export const statsCacheRouter = router({
     }),
 
   /**
-   * Increment message count (fast operation)
-   * Avoids a full upsert by checking if the row exists first
+   * Increment message count (atomic operation)
+   * Uses single upsert with SQL expression for atomic increment
    */
   incrementMessageCount: publicProcedure
     .input(z.object({ subChatId: z.string() }))
     .mutation(async ({ input }) => {
       const db = getDatabase()
-      const existing = await db
-        .select()
-        .from(statsCache)
-        .where(eq(statsCache.subChatId, input.subChatId))
-        .limit(1)
-
-      if (existing[0]) {
-        await db
-          .update(statsCache)
-          .set({
-            messageCount: (existing[0].messageCount ?? 0) + 1,
-            updatedAt: new Date(),
-          })
-          .where(eq(statsCache.subChatId, input.subChatId))
-      } else {
-        await db.insert(statsCache).values({
+      await db
+        .insert(statsCache)
+        .values({
           subChatId: input.subChatId,
           messageCount: 1,
           updatedAt: new Date(),
         })
-      }
+        .onConflictDoUpdate({
+          target: statsCache.subChatId,
+          set: {
+            messageCount: sql`${statsCache.messageCount} + 1`,
+            updatedAt: new Date(),
+          },
+        })
     }),
 })
 
