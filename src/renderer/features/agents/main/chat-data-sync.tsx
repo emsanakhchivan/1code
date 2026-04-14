@@ -12,7 +12,7 @@ import {
 } from "react"
 import { Chat, useChat } from "@ai-sdk/react"
 import { useSetAtom } from "jotai"
-import { syncMessagesWithStatusAtom, messageIdsPerChatAtom, messageAtomFamily, getPerChatMessageKey } from "../stores/message-store"
+import { syncMessagesWithStatusAtom } from "../stores/message-store"
 import { getChunkQueue, clearChunkQueue, type Chunk } from "../../workers/chunk-queue"
 import { useMessageParserWorker, type ParseResult } from "../../hooks/useMessageParserWorker"
 
@@ -73,12 +73,15 @@ export function useBatchedMessageSync(chatId: string) {
   const { parseChunks } = useMessageParserWorker(onWorkerResult)
 
   // Flush buffer periodically using startTransition for non-blocking updates
+  // TODO: Wire flush to Jotai atoms once raw chunk pipeline is integrated
+  // (currently useChat handles streaming internally, so raw chunks aren't available)
   useEffect(() => {
     const flushInterval = setInterval(() => {
       const buffer = messageBuffer.get(chatId)
       if (buffer && buffer.length > 0) {
         startTransition(() => {
-          // Clear buffer after processing
+          // Placeholder: will write buffered parsed messages to Jotai atoms
+          // when raw chunk streaming is integrated outside useChat
           messageBuffer.set(chatId, [])
         })
       }
@@ -188,6 +191,9 @@ export function useBatchedJotaiSync(chatId: string) {
   }, [chatId])
 
   // Force flush on status change (e.g., streaming -> ready)
+  // Deliberately NOT using startTransition here: when streaming ends,
+  // the final state must be synchronously committed to avoid displaying
+  // stale/incomplete messages to the user.
   const forceFlush = useCallback(() => {
     const buffer = jotaiSyncBuffer.get(chatId)
     if (buffer) {
