@@ -50,6 +50,7 @@ export class StreamingChunkQueue {
 
   clear(): void {
     this.queue = [];
+    this.overflowCallbacks.clear();
   }
 }
 
