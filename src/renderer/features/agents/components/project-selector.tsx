@@ -25,7 +25,7 @@ import { IconChevronDown, CheckIcon, FolderPlusIcon, GitHubIcon } from "../../..
 import { ProjectIcon } from "../../../components/ui/project-icon"
 import { trpc } from "../../../lib/trpc"
 import { selectedProjectAtom } from "../atoms"
-import { clearAllChunkQueues } from "../../workers/chunk-queue"
+import { clearAllChunkQueues } from "../../../workers/chunk-queue"
 
 export function ProjectSelector() {
   const [selectedProject, setSelectedProject] = useAtom(selectedProjectAtom)
