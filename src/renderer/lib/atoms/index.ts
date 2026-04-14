@@ -177,6 +177,17 @@ export const clearSubChatSelectionAtom = atom(null, (_get, set) => {
 })
 
 // ============================================
+// STREAMING STATE ATOMS
+// ============================================
+
+export {
+  streamingChatIdsAtom,
+  isChatStreamingAtom,
+  addStreamingChatAtom,
+  removeStreamingChatAtom,
+} from './streaming-state';
+
+// ============================================
 // DIALOG ATOMS (unique to lib/atoms)
 // ============================================
 
