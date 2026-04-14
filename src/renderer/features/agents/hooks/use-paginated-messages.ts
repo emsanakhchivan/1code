@@ -28,9 +28,13 @@ export function usePaginatedMessages(subChatId: string): PaginatedMessagesResult
     },
   );
 
-  // Combine messages: older pages (reversed from pagination order) + recent from initial load
+  // Both endpoints return messages in ascending chronological order.
+  // getMessagesPaginated: slices [startIndex..startIndex+limit] ascending
+  // getInitialMessages: slices last 50 via .slice(-50) ascending
+  // Pages arrive in fetch order (page 0 = first 50, page 1 = next 50, etc.)
+  // so flatMap gives ascending order naturally.
   const olderMessages =
-    infiniteQuery.data?.pages?.flatMap((p) => p.messages).reverse() ?? [];
+    infiniteQuery.data?.pages?.flatMap((p) => p.messages) ?? [];
   const recentMessages = initialQuery.data?.messages ?? [];
   const messages = [...olderMessages, ...recentMessages];
 
