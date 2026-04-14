@@ -25,6 +25,7 @@ import { IconChevronDown, CheckIcon, FolderPlusIcon, GitHubIcon } from "../../..
 import { ProjectIcon } from "../../../components/ui/project-icon"
 import { trpc } from "../../../lib/trpc"
 import { selectedProjectAtom } from "../atoms"
+import { clearAllChunkQueues } from "../../workers/chunk-queue"
 
 export function ProjectSelector() {
   const [selectedProject, setSelectedProject] = useAtom(selectedProjectAtom)
@@ -130,7 +131,14 @@ export function ProjectSelector() {
 
   const handleSelectProject = (projectId: string) => {
     const project = projects?.find((p) => p.id === projectId)
-    if (project) {
+    if (project && project.id !== selectedProject?.id) {
+      // Clear all chunk queues when switching projects
+      // This ensures no stale streaming data persists from previous project's chats
+      clearAllChunkQueues()
+
+      // Invalidate chats cache to ensure fresh data for new project
+      utils.chats.list.invalidate()
+
       setSelectedProject({
         id: project.id,
         name: project.name,

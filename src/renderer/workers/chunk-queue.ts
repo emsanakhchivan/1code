@@ -71,3 +71,14 @@ export const clearChunkQueue = (chatId: string): void => {
     chunkQueues.delete(chatId);
   }
 };
+
+/**
+ * Clear all chunk queues (used for workspace/project cleanup)
+ * Called when switching projects or performing global cleanup
+ */
+export function clearAllChunkQueues(): void {
+  for (const [chatId, queue] of chunkQueues) {
+    queue.clear();
+  }
+  chunkQueues.clear();
+}

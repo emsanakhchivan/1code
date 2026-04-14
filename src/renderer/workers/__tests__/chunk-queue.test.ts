@@ -1,6 +1,6 @@
 // src/renderer/workers/__tests__/chunk-queue.test.ts
 import { describe, it, expect } from 'vitest';
-import { StreamingChunkQueue, getChunkQueue, clearChunkQueue } from '../chunk-queue';
+import { StreamingChunkQueue, getChunkQueue, clearChunkQueue, clearAllChunkQueues } from '../chunk-queue';
 
 describe('StreamingChunkQueue', () => {
   it('should push chunks when not full', () => {
@@ -129,5 +129,33 @@ describe('Chunk Queue Singleton', () => {
     const newQueue = getChunkQueue('chat-to-clear');
     expect(newQueue).not.toBe(queue);
     expect(newQueue.size()).toBe(0);
+  });
+
+  it('should clear all chunk queues', () => {
+    // Create multiple queues with data
+    const queue1 = getChunkQueue('chat-all-1');
+    const queue2 = getChunkQueue('chat-all-2');
+    const queue3 = getChunkQueue('chat-all-3');
+
+    queue1.push({ chatId: 'chat-all-1', raw: 'data1', timestamp: 1 });
+    queue2.push({ chatId: 'chat-all-2', raw: 'data2', timestamp: 2 });
+    queue3.push({ chatId: 'chat-all-3', raw: 'data3', timestamp: 3 });
+
+    // Clear all queues
+    clearAllChunkQueues();
+
+    // All queues should now be empty and deleted
+    // Getting them again should create new instances
+    const newQueue1 = getChunkQueue('chat-all-1');
+    const newQueue2 = getChunkQueue('chat-all-2');
+    const newQueue3 = getChunkQueue('chat-all-3');
+
+    expect(newQueue1).not.toBe(queue1);
+    expect(newQueue2).not.toBe(queue2);
+    expect(newQueue3).not.toBe(queue3);
+
+    expect(newQueue1.size()).toBe(0);
+    expect(newQueue2.size()).toBe(0);
+    expect(newQueue3.size()).toBe(0);
   });
 });
