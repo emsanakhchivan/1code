@@ -1268,6 +1268,86 @@ export const chatsRouter = router({
       }
     }),
 
+  getMessagesPaginated: publicProcedure
+    .input(
+      z.object({
+        subChatId: z.string(),
+        cursor: z.string().optional(),
+        limit: z.number().default(50),
+      }),
+    )
+    .query(({ input }) => {
+      const db = getDatabase()
+      const { subChatId, cursor, limit } = input
+
+      const subChat = db
+        .select({ messages: subChats.messages })
+        .from(subChats)
+        .where(eq(subChats.id, subChatId))
+        .limit(1)
+        .get()
+
+      if (!subChat) {
+        return { messages: [], nextCursor: null, hasMore: false, total: 0 }
+      }
+
+      const allMessages = JSON.parse(subChat.messages || "[]")
+
+      // Cursor is base64 of index
+      let startIndex = 0
+      if (cursor) {
+        try {
+          startIndex = parseInt(atob(cursor), 10)
+        } catch {
+          startIndex = 0
+        }
+      }
+
+      const messages = allMessages.slice(startIndex, startIndex + limit)
+      const endIndex = startIndex + limit
+      const hasMore = endIndex < allMessages.length
+      const nextCursor = hasMore ? btoa(String(endIndex)) : null
+
+      return { messages, nextCursor, hasMore, total: allMessages.length }
+    }),
+
+  getInitialMessages: publicProcedure
+    .input(z.object({ subChatId: z.string() }))
+    .query(({ input }) => {
+      const db = getDatabase()
+
+      const result = db
+        .select({
+          messages: subChats.messages,
+        })
+        .from(subChats)
+        .where(eq(subChats.id, input.subChatId))
+        .limit(1)
+        .get()
+
+      if (!result) {
+        return { messages: [], stats: null, total: 0, hasMore: false }
+      }
+
+      const allMessages = JSON.parse(result.messages || "[]")
+      const initialMessages = allMessages.slice(-50) // Last 50 (most recent)
+
+      // Also get stats from stats_cache
+      const cachedStats = db
+        .select()
+        .from(statsCache)
+        .where(eq(statsCache.subChatId, input.subChatId))
+        .limit(1)
+        .get()
+
+      return {
+        messages: initialMessages,
+        stats: cachedStats,
+        total: allMessages.length,
+        hasMore: allMessages.length > 50,
+      }
+    }),
+
   /**
    * Update sub-chat session ID (for Claude resume)
    */
