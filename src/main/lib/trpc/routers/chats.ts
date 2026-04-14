@@ -1114,10 +1114,14 @@ export const chatsRouter = router({
         .get()
 
       // Update stats_cache for fast sidebar queries
-      const parsedMessages = JSON.parse(input.messages || "[]") as Array<{ role: string; content?: string | Array<unknown> }>
+      const parsedMessages = JSON.parse(input.messages || "[]") as Array<{ role: string; parts?: Array<{ type: string; text?: string }> }>
       const lastUserMessage = [...parsedMessages].reverse().find((m) => m.role === "user")
-      const lastPreview = lastUserMessage?.content
-        ? (typeof lastUserMessage.content === "string" ? lastUserMessage.content : JSON.stringify(lastUserMessage.content)).slice(0, 100)
+      const lastPreview = lastUserMessage?.parts
+        ? lastUserMessage.parts
+            .filter((p) => p.type === "text" && typeof p.text === "string")
+            .map((p) => p.text!)
+            .join(" ")
+            .slice(0, 100) || null
         : null
 
       db.insert(statsCache).values({
@@ -1216,17 +1220,47 @@ export const chatsRouter = router({
 
       // 6. Update the sub-chat with truncated messages (recompute pre-computed stats)
       const truncatedMessagesJson = JSON.stringify(truncatedMessages)
+      const rollbackFileStats = computeFileStats(truncatedMessagesJson)
+      const rollbackHasPendingPlan = computeHasPendingPlan(truncatedMessagesJson, subChat.mode)
+      const rollbackMessageCount = truncatedMessages.length
       db.update(subChats)
         .set({
           messages: truncatedMessagesJson,
-          fileStats: (() => { const s = computeFileStats(truncatedMessagesJson); return s ? JSON.stringify(s) : null })(),
-          hasPendingPlan: computeHasPendingPlan(truncatedMessagesJson, subChat.mode),
-          messageCount: truncatedMessages.length,
+          fileStats: rollbackFileStats ? JSON.stringify(rollbackFileStats) : null,
+          hasPendingPlan: rollbackHasPendingPlan,
+          messageCount: rollbackMessageCount,
           updatedAt: new Date(),
         })
         .where(eq(subChats.id, input.subChatId))
         .returning()
         .get()
+
+      // Update stats_cache after rollback to keep it in sync
+      const lastUserMsg = [...truncatedMessages].reverse().find((m: any) => m.role === "user")
+      const rollbackPreview = lastUserMsg?.parts
+        ? lastUserMsg.parts
+            .filter((p: any) => p.type === "text" && typeof p.text === "string")
+            .map((p: any) => p.text)
+            .join(" ")
+            .slice(0, 100) || null
+        : null
+      db.insert(statsCache).values({
+        subChatId: input.subChatId,
+        fileCount: rollbackFileStats?.fileCount ?? 0,
+        pendingPlans: rollbackHasPendingPlan ? 1 : 0,
+        messageCount: rollbackMessageCount,
+        lastMessagePreview: rollbackPreview,
+        updatedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: statsCache.subChatId,
+        set: {
+          fileCount: rollbackFileStats?.fileCount ?? 0,
+          pendingPlans: rollbackHasPendingPlan ? 1 : 0,
+          messageCount: rollbackMessageCount,
+          lastMessagePreview: rollbackPreview,
+          updatedAt: new Date(),
+        },
+      }).run()
 
       return {
         success: true,
