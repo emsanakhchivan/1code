@@ -1,12 +1,5 @@
 import { create } from "zustand"
 import { subscribeWithSelector } from "zustand/middleware"
-import { useEffect } from "react"
-import { useAtom } from "jotai"
-import {
-  streamingChatIdsAtom,
-  addStreamingChatAtom,
-  removeStreamingChatAtom,
-} from "../../../lib/atoms"
 
 export type StreamingStatus = "ready" | "streaming" | "submitted" | "error"
 
@@ -22,6 +15,25 @@ interface StreamingStatusState {
 
   // Get all sub-chats that are ready (not streaming)
   getReadySubChats: () => string[]
+}
+
+// ============================================================================
+// ZUSTAND-TO-JOTAI SYNC BRIDGE
+// ============================================================================
+// This callback-based bridge allows Zustand store changes to sync directly
+// to Jotai atoms without requiring React hooks or iterating all statuses.
+// The hook useStreamingAtomSync registers this callback at app initialization.
+
+let streamingAtomSync: ((chatId: string, isStreaming: boolean) => void) | null = null
+
+/**
+ * Register a callback to sync streaming state changes to Jotai atoms.
+ * Called by useStreamingAtomSync hook at app initialization.
+ */
+export const setStreamingAtomSync = (
+  syncFn: ((chatId: string, isStreaming: boolean) => void) | null
+) => {
+  streamingAtomSync = syncFn
 }
 
 export const useStreamingStatusStore = create<StreamingStatusState>()(
@@ -41,12 +53,9 @@ export const useStreamingStatusStore = create<StreamingStatusState>()(
         },
       }))
 
-      // Sync documentation: streaming state changes
-      if (!wasStreaming && nowStreaming) {
-        // Chat started streaming - will be synced to stream-active atom via useSyncStreamingToAtom
-      }
-      if (wasStreaming && !nowStreaming) {
-        // Chat stopped streaming - will be removed from stream-active atom
+      // Direct sync to Jotai atom via callback - only on state change
+      if (streamingAtomSync && wasStreaming !== nowStreaming) {
+        streamingAtomSync(subChatId, nowStreaming)
       }
     },
 
@@ -75,30 +84,3 @@ export const useStreamingStatusStore = create<StreamingStatusState>()(
     },
   }))
 )
-
-/**
- * Hook to sync Zustand streaming status store with Jotai atoms.
- * Call this at the app root level to keep the stream-active set in sync.
- *
- * This enables state partitioning where streaming chats remain active
- * even when not being viewed, preventing React from re-rendering them
- * during message sync for other chats.
- */
-export const useSyncStreamingToAtom = () => {
-  const [, setAddStreaming] = useAtom(addStreamingChatAtom)
-  const [, setRemoveStreaming] = useAtom(removeStreamingChatAtom)
-  const statuses = useStreamingStatusStore((state) => state.statuses)
-
-  useEffect(() => {
-    // Sync current streaming status to atom
-    for (const [subChatId, status] of Object.entries(statuses)) {
-      const isStreaming =
-        status === "streaming" || status === "submitted"
-      if (isStreaming) {
-        setAddStreaming(subChatId)
-      } else {
-        setRemoveStreaming(subChatId)
-      }
-    }
-  }, [statuses, setAddStreaming, setRemoveStreaming])
-}

@@ -6,6 +6,7 @@ import { TooltipProvider } from "./components/ui/tooltip"
 import { TRPCProvider } from "./contexts/TRPCProvider"
 import { WindowProvider, getInitialWindowParams } from "./contexts/WindowContext"
 import { selectedProjectAtom, selectedAgentChatIdAtom } from "./features/agents/atoms"
+import { useStreamingAtomSync } from "./features/agents/hooks/useStreamingAtomSync"
 import { useAgentSubChatStore } from "./features/agents/stores/sub-chat-store"
 import { AgentsLayout } from "./features/layout/agents-layout"
 import {
@@ -46,6 +47,10 @@ function ThemedToaster() {
  * Main content router - decides which page to show based on onboarding state
  */
 function AppContent() {
+  // Initialize streaming status sync between Zustand and Jotai
+  // This must be called at the root to ensure streaming state is tracked globally
+  useStreamingAtomSync()
+
   const billingMethod = useAtomValue(billingMethodAtom)
   const setBillingMethod = useSetAtom(billingMethodAtom)
   const localMode = useAtomValue(localModeAtom)
