@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useEffect, useRef, useState, memo, forwardRef, useImperativeHandle } from "react"
+import { useCallback, useMemo, useEffect, useRef, useState, memo, forwardRef, useImperativeHandle, useTransition } from "react"
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import {
   loadingSubChatsAtom,
@@ -11,6 +11,7 @@ import {
 import {
   touchChatAccess,
   evictLeastRecentlyUsed,
+  viewActiveChatIdAtom,
 } from "../stores/message-store"
 import { useStreamingStatusStore } from "../stores/streaming-status-store"
 import {
@@ -243,6 +244,10 @@ export function SubChatSelector({
   )
   const pendingQuestionsMap = useAtomValue(pendingUserQuestionsAtom)
 
+  // startTransition for non-blocking tab switching
+  const [, startTransition] = useTransition()
+  const setViewActive = useSetAtom(viewActiveChatIdAtom)
+
   // Overview sidebar state - to check if widgets are visible
   const isUnifiedSidebarEnabled = useAtomValue(unifiedSidebarEnabledAtom)
   const chatSourceMode = useAtomValue(chatSourceModeAtom)
@@ -348,8 +353,14 @@ export function SubChatSelector({
 
   const onSwitch = useCallback(
     (subChatId: string) => {
+      // Immediate: highlight the tab (existing behavior)
       const store = useAgentSubChatStore.getState()
       store.setActiveSubChat(subChatId)
+
+      // Deferred: update view-active state for state partitioning
+      startTransition(() => {
+        setViewActive(subChatId)
+      })
 
       // Clear unseen indicator for this sub-chat
       setSubChatUnseenChanges((prev: Set<string>) => {
@@ -361,7 +372,7 @@ export function SubChatSelector({
         return prev
       })
     },
-    [setSubChatUnseenChanges],
+    [setSubChatUnseenChanges, startTransition, setViewActive],
   )
 
   const onSwitchFromHistory = useCallback((subChatId: string) => {
@@ -371,8 +382,13 @@ export function SubChatSelector({
     if (!isAlreadyOpen) {
       state.addToOpenSubChats(subChatId)
     }
+    // Immediate: set active tab
     state.setActiveSubChat(subChatId)
-  }, [])
+    // Deferred: update view-active state
+    startTransition(() => {
+      setViewActive(subChatId)
+    })
+  }, [startTransition, setViewActive])
 
   const onCloseTab = useCallback((subChatId: string) => {
     useAgentSubChatStore.getState().removeFromOpenSubChats(subChatId)
