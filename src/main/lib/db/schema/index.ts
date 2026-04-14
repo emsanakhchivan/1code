@@ -1,6 +1,7 @@
 import { index, sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
 import { relations } from "drizzle-orm"
 import { createId } from "../utils"
+import { statsCache, statsCacheRelations } from "./stats-cache"
 
 // ============ PROJECTS ============
 export const projects = sqliteTable("projects", {
@@ -215,3 +216,5 @@ export type NewAnthropicAccount = typeof anthropicAccounts.$inferInsert
 export type AnthropicSettings = typeof anthropicSettings.$inferSelect
 export type TokenUsage = typeof tokenUsage.$inferSelect
 export type NewTokenUsage = typeof tokenUsage.$inferInsert
+export type StatsCache = typeof statsCache.$inferSelect
+export type NewStatsCache = typeof statsCache.$inferInsert
