@@ -11,7 +11,7 @@ import {
   trackWorkspaceCreated,
   trackWorkspaceDeleted,
 } from "../../analytics"
-import { chats, getDatabase, projects, subChats } from "../../db"
+import { chats, getDatabase, projects, statsCache, subChats } from "../../db"
 import {
   createWorktreeForChat,
   fetchGitHubPRStatus,
@@ -1100,7 +1100,7 @@ export const chatsRouter = router({
       const hasPendingPlan = computeHasPendingPlan(input.messages, mode)
       const messageCount = computeMessageCount(input.messages)
 
-      return db
+      const result = db
         .update(subChats)
         .set({
           messages: input.messages,
@@ -1112,6 +1112,33 @@ export const chatsRouter = router({
         .where(eq(subChats.id, input.id))
         .returning()
         .get()
+
+      // Update stats_cache for fast sidebar queries
+      const parsedMessages = JSON.parse(input.messages || "[]") as Array<{ role: string; content?: string | Array<unknown> }>
+      const lastUserMessage = [...parsedMessages].reverse().find((m) => m.role === "user")
+      const lastPreview = lastUserMessage?.content
+        ? (typeof lastUserMessage.content === "string" ? lastUserMessage.content : JSON.stringify(lastUserMessage.content)).slice(0, 100)
+        : null
+
+      db.insert(statsCache).values({
+        subChatId: input.id,
+        fileCount: fileStats?.fileCount ?? 0,
+        pendingPlans: hasPendingPlan ? 1 : 0,
+        messageCount,
+        lastMessagePreview: lastPreview,
+        updatedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: statsCache.subChatId,
+        set: {
+          fileCount: fileStats?.fileCount ?? 0,
+          pendingPlans: hasPendingPlan ? 1 : 0,
+          messageCount,
+          lastMessagePreview: lastPreview,
+          updatedAt: new Date(),
+        },
+      }).run()
+
+      return result
     }),
 
   /**

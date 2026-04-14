@@ -1,7 +1,7 @@
 import { index, sqliteTable, text, integer } from "drizzle-orm/sqlite-core"
 import { relations } from "drizzle-orm"
 import { createId } from "../utils"
-import { statsCache, statsCacheRelations } from "./stats-cache"
+export { statsCache, statsCacheRelations } from "./stats-cache"
 
 // ============ PROJECTS ============
 export const projects = sqliteTable("projects", {
