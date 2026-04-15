@@ -356,10 +356,9 @@ export function buildAgentEnv(options: {
     enableTasks: options.enableTasks,
   })
 
-  // OpenClaude + OpenAI-compatible endpoint
-  if (options.agentType === "openclaude" &&
-      options.endpointType === "openai-compatible" &&
-      options.profile) {
+  // OpenClaude with custom profile - ALWAYS use OpenAI env vars
+  // OpenClaude requires these env vars regardless of endpointType
+  if (options.agentType === "openclaude" && options.profile) {
     return {
       ...baseEnv,
       CLAUDE_CODE_USE_OPENAI: "true",
@@ -369,7 +368,7 @@ export function buildAgentEnv(options: {
     }
   }
 
-  // Claude Code or OpenClaude + Anthropic endpoint - use base env
+  // Claude Code or no profile - use base env
   return baseEnv
 }
 
@@ -405,5 +404,18 @@ export function logClaudeEnv(
   )
   console.log(
     `${prefix}[claude-env] ANTHROPIC_AUTH_TOKEN: ${env.ANTHROPIC_AUTH_TOKEN ? "set" : "not set"}`
+  )
+  // OpenAI env vars (for OpenClaude)
+  console.log(
+    `${prefix}[claude-env] CLAUDE_CODE_USE_OPENAI: ${env.CLAUDE_CODE_USE_OPENAI || "not set"}`
+  )
+  console.log(
+    `${prefix}[claude-env] OPENAI_BASE_URL: ${env.OPENAI_BASE_URL || "not set"}`
+  )
+  console.log(
+    `${prefix}[claude-env] OPENAI_API_KEY: ${env.OPENAI_API_KEY ? "set" : "not set"}`
+  )
+  console.log(
+    `${prefix}[claude-env] OPENAI_MODEL: ${env.OPENAI_MODEL || "not set"}`
   )
 }
