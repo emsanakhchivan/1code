@@ -1199,6 +1199,8 @@ export const claudeRouter = router({
               }
 
               console.log(`[${agentType}] Spawning: node ${openClaudePath}`)
+              console.log(`[${agentType}] CLI args:`, cliArgs.join(" "))
+              console.log(`[${agentType}] Spawn cwd:`, spawnCwd)
 
               // Start inactivity timer before spawn - catches cases where stream never emits
               resetInactivityTimer()
@@ -1266,15 +1268,18 @@ export const claudeRouter = router({
                 resetInactivityTimer()
               })
 
-              // Handle stderr
+              // Handle stderr - capture full output for debugging
+              let stderrOutput = ""
               childProcess.stderr?.on("data", (data: Buffer) => {
-                console.error(`[${agentType}] stderr:`, data.toString())
+                stderrOutput += data.toString()
+                console.error(`[${agentType}] stderr chunk:`, data.toString())
               })
 
               // Handle process exit
               childProcess.on("exit", (code, signal) => {
                 if (code !== 0 && code !== null) {
-                  emitError(new Error(`Process exited with code ${code}`), "Process crash")
+                  console.error(`[${agentType}] FULL stderr output:`, stderrOutput)
+                  emitError(new Error(`Process exited with code ${code}: ${stderrOutput.slice(0, 500)}`), "Process crash")
                 }
                 safeEmit({ type: "finish" } as UIMessageChunk)
                 safeComplete()
