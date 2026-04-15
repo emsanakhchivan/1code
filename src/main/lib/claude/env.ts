@@ -356,15 +356,27 @@ export function buildAgentEnv(options: {
     enableTasks: options.enableTasks,
   })
 
-  // OpenClaude with custom profile - ALWAYS use OpenAI env vars
-  // OpenClaude requires these env vars regardless of endpointType
+  // OpenClaude with custom profile - set appropriate env vars based on endpointType
   if (options.agentType === "openclaude" && options.profile) {
-    return {
-      ...baseEnv,
-      CLAUDE_CODE_USE_OPENAI: "true",
-      OPENAI_BASE_URL: options.profile.baseUrl,
-      OPENAI_API_KEY: options.profile.token,
-      OPENAI_MODEL: options.profile.models[0]?.modelId || "",
+    const endpointType = options.endpointType || "anthropic"
+
+    if (endpointType === "openai-compatible") {
+      // OpenAI-compatible: use OpenAI env vars
+      return {
+        ...baseEnv,
+        CLAUDE_CODE_USE_OPENAI: "true",
+        OPENAI_BASE_URL: options.profile.baseUrl,
+        OPENAI_API_KEY: options.profile.token,
+        OPENAI_MODEL: options.profile.models[0]?.modelId || "",
+      }
+    } else {
+      // Anthropic endpoint: use ANTHROPIC env vars
+      return {
+        ...baseEnv,
+        ANTHROPIC_AUTH_TOKEN: options.profile.token,
+        ANTHROPIC_BASE_URL: options.profile.baseUrl,
+        ANTHROPIC_DEFAULT_MODEL: options.profile.models[0]?.modelId || "",
+      }
     }
   }
 
@@ -402,10 +414,17 @@ export function logClaudeEnv(
   console.log(
     `${prefix}[claude-env] PATH includes /usr/local/bin: ${env.PATH?.includes("/usr/local/bin")}`
   )
+  // Anthropic env vars
   console.log(
     `${prefix}[claude-env] ANTHROPIC_AUTH_TOKEN: ${env.ANTHROPIC_AUTH_TOKEN ? "set" : "not set"}`
   )
-  // OpenAI env vars (for OpenClaude)
+  console.log(
+    `${prefix}[claude-env] ANTHROPIC_BASE_URL: ${env.ANTHROPIC_BASE_URL || "not set"}`
+  )
+  console.log(
+    `${prefix}[claude-env] ANTHROPIC_DEFAULT_MODEL: ${env.ANTHROPIC_DEFAULT_MODEL || "not set"}`
+  )
+  // OpenAI env vars (for OpenAI-compatible endpoints)
   console.log(
     `${prefix}[claude-env] CLAUDE_CODE_USE_OPENAI: ${env.CLAUDE_CODE_USE_OPENAI || "not set"}`
   )
