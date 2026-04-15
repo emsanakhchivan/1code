@@ -789,6 +789,7 @@ export const claudeRouter = router({
             baseUrl: z.string().min(1),
             profileId: z.string().optional(),
             profileName: z.string().optional(),
+            endpointType: z.enum(["anthropic", "openai-compatible"]).optional(),
           })
           .optional(),
         maxThinkingTokens: z.number().optional(), // Enable extended thinking
@@ -796,6 +797,7 @@ export const claudeRouter = router({
         historyEnabled: z.boolean().optional(),
         offlineModeEnabled: z.boolean().optional(), // Whether offline mode (Ollama) is enabled in settings
         enableTasks: z.boolean().optional(), // Enable task management tools (TodoWrite, Task agents)
+        agentType: z.enum(["claude-code", "openclaude"]).default("claude-code"),
       }),
     )
     .subscription(({ input }) => {
