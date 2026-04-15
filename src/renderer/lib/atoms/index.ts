@@ -618,12 +618,42 @@ export const betaUpdatesEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true },
 )
 
-// Agent type selection - global setting (claude-code vs openclaude)
-export const agentTypeAtom = atomWithStorage<"claude-code" | "openclaude">(
+// Agent type selection with auto-clear of incompatible profiles
+const baseAgentTypeAtom = atomWithStorage<"claude-code" | "openclaude">(
   "agents:agent-type",
-  "claude-code",  // default
+  "claude-code",
   undefined,
   { getOnInit: true },
+)
+
+export const agentTypeAtom = atom(
+  (get) => get(baseAgentTypeAtom),
+  (get, set, newType: "claude-code" | "openclaude") => {
+    const currentType = get(baseAgentTypeAtom)
+
+    // Only process if actually changing
+    if (currentType === newType) return
+
+    // Switching to claude-code - check for incompatible profile
+    if (newType === "claude-code") {
+      const activeProfileId = get(activeProfileIdAtom)
+      const profiles = get(modelProfilesAtom)
+      const currentProfile = profiles.find(p => p.id === activeProfileId)
+
+      if (currentProfile?.endpointType === "openai-compatible") {
+        // Clear profile selection
+        set(activeProfileIdAtom, null)
+        set(activeCustomModelIdAtom, null)
+
+        // Store the cleared profile info for toast notification
+        // The UI component will show the toast
+        console.log(`[agentType] Auto-cleared incompatible profile: ${currentProfile.name}`)
+      }
+    }
+
+    // Update the base atom
+    set(baseAgentTypeAtom, newType)
+  }
 )
 
 // Preferences - Ctrl+Tab Quick Switch Target

@@ -1,6 +1,6 @@
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
 import { ChevronDown, Edit2, MoreHorizontal, Plus, Trash2, Check, Settings, Clock, Zap } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   agentsLoginModalOpenAtom,
@@ -574,6 +574,25 @@ export function AgentsModelsTab() {
   const [editingProfile, setEditingProfile] = useState<ModelProfile | null>(null)
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false)
 
+  // Track previous profile for toast when switching agent type
+  const previousProfileRef = useRef<string | null>(null)
+  useEffect(() => {
+    previousProfileRef.current = activeProfileId
+  }, [activeProfileId])
+
+  // Handler for agent type change with toast notification
+  const handleAgentTypeChange = useCallback((newType: "claude-code" | "openclaude") => {
+    if (newType === "claude-code" && previousProfileRef.current) {
+      const previousProfile = modelProfiles.find(p => p.id === previousProfileRef.current)
+      if (previousProfile?.endpointType === "openai-compatible") {
+        toast.info("Profile cleared", {
+          description: `"${previousProfile.name}" requires OpenClaude mode. Switched to default Claude model.`,
+        })
+      }
+    }
+    setAgentType(newType)
+  }, [modelProfiles, setAgentType])
+
   // Filter out offline profile - only show custom profiles
   const customProfiles = useMemo(() => 
     modelProfiles.filter(p => !p.isOffline),
@@ -948,7 +967,7 @@ export function AgentsModelsTab() {
                 ? "border-primary bg-primary/5"
                 : "border-border hover:border-muted-foreground/50"
             )}
-            onClick={() => setAgentType("claude-code")}
+            onClick={() => handleAgentTypeChange("claude-code")}
           >
             <RadioGroupItem
               value="claude-code"
@@ -973,7 +992,7 @@ export function AgentsModelsTab() {
                 ? "border-primary bg-primary/5"
                 : "border-border hover:border-muted-foreground/50"
             )}
-            onClick={() => setAgentType("openclaude")}
+            onClick={() => handleAgentTypeChange("openclaude")}
           >
             <RadioGroupItem
               value="openclaude"
