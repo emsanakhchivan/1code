@@ -1,5 +1,6 @@
 "use client"
 
+import { useAtomValue } from "jotai"
 import { Brain, ChevronRight, Settings, Zap } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
@@ -14,6 +15,7 @@ import {
   CommandSeparator,
 } from "../../../components/ui/command"
 import { CheckIcon, ClaudeCodeIcon, IconChevronDown, ThinkingIcon } from "../../../components/ui/icons"
+import { Badge } from "../../ui/badge"
 import { Switch } from "../../../components/ui/switch"
 import { Checkbox } from "../../../components/ui/checkbox"
 import { Button } from "../../../components/ui/button"
@@ -25,6 +27,7 @@ import {
 import { cn } from "../../../lib/utils"
 import type { CodexThinkingLevel } from "../lib/models"
 import { formatCodexThinkingLabel } from "../lib/models"
+import { agentTypeAtom } from "../../../lib/atoms"
 import type { ModelProfile, CustomModelConfig } from "../../../lib/atoms"
 
 const CROSS_PROVIDER_DIALOG_DISMISSED_KEY = "agent-model-selector:skip-cross-provider-dialog"
@@ -337,6 +340,8 @@ export function AgentModelSelector({
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [pendingProvider, setPendingProvider] = useState<AgentProviderId | null>(null)
 
+  const agentType = useAtomValue(agentTypeAtom)
+
   const canSelectProvider = (provider: AgentProviderId) =>
     allowProviderSwitch || selectedAgentId === provider
 
@@ -447,6 +452,14 @@ export function AgentModelSelector({
   }
 
   const isItemDisabled = (item: FlatModelItem): boolean => {
+    // Check endpoint compatibility
+    if (item.type === "customModel") {
+      const profileEndpointType = item.profile.endpointType || "anthropic"
+      if (profileEndpointType === "openai-compatible" && agentType === "claude-code") {
+        return true
+      }
+    }
+
     const provider = getItemProvider(item)
     if (canSelectProvider(provider)) return false
     // When onContinueWithProvider is available, cross-provider items are clickable (not disabled)
@@ -650,7 +663,11 @@ export function AgentModelSelector({
                       value={getItemKey(item)}
                       onSelect={() => handleItemClick(item)}
                       disabled={disabled}
-                      className={cn("gap-2", crossProvider && "opacity-60")}
+                      className={cn(
+                        "gap-2",
+                        disabled && "opacity-50 cursor-not-allowed",
+                        crossProvider && "opacity-60"
+                      )}
                     >
                       {getItemIcon(item)}
                       <div className="flex flex-col flex-1 min-w-0">
@@ -661,6 +678,13 @@ export function AgentModelSelector({
                           </span>
                         )}
                       </div>
+                      {item.type === "customModel" &&
+                        item.profile.endpointType === "openai-compatible" &&
+                        agentType === "claude-code" && (
+                        <Badge variant="outline" className="ml-2 text-xs text-orange-500">
+                          OpenClaude only
+                        </Badge>
+                      )}
                       {crossProvider && (
                         <span className="text-[10px] text-muted-foreground shrink-0">New chat</span>
                       )}
