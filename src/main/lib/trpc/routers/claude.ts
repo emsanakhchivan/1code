@@ -1211,8 +1211,9 @@ export const claudeRouter = router({
               // -p: print mode (non-interactive)
               // --output-format stream-json: JSON streaming output (requires --verbose)
               // --verbose: enable verbose output for stream-json mode
-              // --resume <session-id>: resume existing session (for continuation)
-              // --continue: continue mode (for first message, no session yet)
+              // For NEW chats: --continue (no session yet)
+              // For EXISTING chats: --resume <id> --fork-session (resume history but fork to new ID)
+              // --fork-session avoids "session already in use" error
               // prompt as positional argument
               const cliArgs = [
                 openClaudePath,
@@ -1220,7 +1221,9 @@ export const claudeRouter = router({
                 "--verbose",
                 "--output-format", "stream-json",
                 ...(resolvedModel ? ["--model", resolvedModel] : []),
-                ...(resumeSessionId ? ["--resume", resumeSessionId] : ["--continue"]),
+                ...(resumeSessionId
+                  ? ["--resume", resumeSessionId, "--fork-session"]
+                  : ["--continue"]),
                 ...(input.mode === "plan" ? ["--permission-mode", "plan"] : []),
                 input.prompt,
               ]
