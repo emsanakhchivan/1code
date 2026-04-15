@@ -1267,6 +1267,14 @@ export const claudeRouter = router({
                     const chunk = JSON.parse(line)
                     const transformed = openClaudeTransform(chunk)
                     for (const t of transformed) {
+                      // Inject model info from config BEFORE emitting (fixes UI display during streaming)
+                      if (t.type === "message-metadata" && finalCustomConfig) {
+                        t.messageMetadata = {
+                          ...t.messageMetadata,
+                          modelId: finalCustomConfig.model,
+                          modelProvider: endpointType === "openai-compatible" ? "openai" : "custom",
+                        }
+                      }
                       safeEmit(t)
 
                       // Accumulate parts for DB save (mirrors SDK branch)
