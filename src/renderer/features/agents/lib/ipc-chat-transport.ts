@@ -123,6 +123,35 @@ const ERROR_TOAST_CONFIG: Record<
     title: "Anthropic API hiccup",
     description: "The request was rejected by Anthropic's servers. Please try again shortly.",
   },
+  // OpenAI-compatible endpoint errors
+  OPENAI_AUTH_FAILED: {
+    title: "OpenAI authentication failed",
+    description: "Check your API key or token for this endpoint.",
+  },
+  OPENAI_MODEL_NOT_FOUND: {
+    title: "Model not available",
+    description: "The selected model is not available at this endpoint.",
+  },
+  OPENAI_RATE_LIMIT: {
+    title: "Rate limit exceeded",
+    description: "This endpoint has rate limits. Wait and try again.",
+  },
+  OPENAI_CONNECTION_FAILED: {
+    title: "Endpoint unreachable",
+    description: "Could not connect to the endpoint. Check URL and network.",
+  },
+  OPENCLAUDE_BINARY_NOT_FOUND: {
+    title: "OpenClaude CLI not found",
+    description: "Run 'bun run openclaude:download' to bundle the CLI.",
+    action: {
+      label: "Copy command",
+      onClick: () => navigator.clipboard.writeText("bun run openclaude:download"),
+    },
+  },
+  NODE_NOT_FOUND: {
+    title: "Node.js not found",
+    description: "OpenClaude requires Node.js. Install Node or use Claude Code mode.",
+  },
   // SDK_ERROR and other unknown errors use chunk.errorText for description
 }
 

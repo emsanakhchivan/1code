@@ -15,7 +15,7 @@ import {
   CommandSeparator,
 } from "../../../components/ui/command"
 import { CheckIcon, ClaudeCodeIcon, IconChevronDown, ThinkingIcon } from "../../../components/ui/icons"
-import { Badge } from "../../ui/badge"
+import { Badge } from "../../../components/ui/badge"
 import { Switch } from "../../../components/ui/switch"
 import { Checkbox } from "../../../components/ui/checkbox"
 import { Button } from "../../../components/ui/button"
