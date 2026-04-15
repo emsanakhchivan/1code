@@ -104,6 +104,51 @@ export function getBundledClaudeBinaryPath(): string {
   return binaryPath
 }
 
+// Cache for OpenClaude binary path
+let cachedOpenClaudePath: string | null = null
+let openClaudePathComputed = false
+
+/**
+ * Get path to the bundled OpenClaude CLI binary.
+ * OpenClaude is a Node.js .mjs file that requires Node to run.
+ */
+export function getBundledOpenClaudeBinaryPath(): string {
+  if (openClaudePathComputed) {
+    return cachedOpenClaudePath!
+  }
+
+  const isDev = !app.isPackaged
+  const currentPlatform = process.platform
+  const arch = process.arch
+
+  console.log("[openclaude-binary] ========== BUNDLED BINARY DEBUG ==========")
+  console.log("[openclaude-binary] isDev:", isDev)
+  console.log("[openclaude-binary] platform:", currentPlatform)
+  console.log("[openclaude-binary] arch:", arch)
+
+  const resourcesPath = isDev
+    ? path.join(app.getAppPath(), "resources/bin", `${currentPlatform}-${arch}`)
+    : path.join(process.resourcesPath, "bin")
+
+  const binaryPath = path.join(resourcesPath, "openclaude.mjs")
+
+  console.log("[openclaude-binary] binaryPath:", binaryPath)
+
+  const exists = fs.existsSync(binaryPath)
+  if (!exists) {
+    console.error("[openclaude-binary] WARNING: Binary not found at path:", binaryPath)
+    console.error("[openclaude-binary] Run 'bun run openclaude:download' to download it")
+  } else {
+    console.log("[openclaude-binary] exists:", exists)
+  }
+  console.log("[openclaude-binary] ============================================")
+
+  cachedOpenClaudePath = binaryPath
+  openClaudePathComputed = true
+
+  return binaryPath
+}
+
 /**
  * Parse environment variables from shell output
  */
@@ -282,10 +327,54 @@ export function buildClaudeEnv(options?: {
 }
 
 /**
+ * Build environment for agent (claude-code or openclaude).
+ * For OpenClaude + OpenAI-compatible endpoints, add OpenAI-specific env vars.
+ */
+export function buildAgentEnv(options: {
+  agentType?: "claude-code" | "openclaude"
+  endpointType?: "anthropic" | "openai-compatible"
+  profile?: { baseUrl: string; token: string; models: { modelId: string }[] }
+  ghToken?: string
+  customEnv?: Record<string, string>
+  enableTasks?: boolean
+}): Record<string, string> {
+  // Start with base Claude env
+  const baseEnv = buildClaudeEnv({
+    ghToken: options.ghToken,
+    customEnv: options.customEnv,
+    enableTasks: options.enableTasks,
+  })
+
+  // OpenClaude + OpenAI-compatible endpoint
+  if (options.agentType === "openclaude" &&
+      options.endpointType === "openai-compatible" &&
+      options.profile) {
+    return {
+      ...baseEnv,
+      CLAUDE_CODE_USE_OPENAI: "true",
+      OPENAI_BASE_URL: options.profile.baseUrl,
+      OPENAI_API_KEY: options.profile.token,
+      OPENAI_MODEL: options.profile.models[0]?.modelId || "",
+    }
+  }
+
+  // Claude Code or OpenClaude + Anthropic endpoint - use base env
+  return baseEnv
+}
+
+/**
  * Clear cached shell environment (useful for testing)
  */
 export function clearClaudeEnvCache(): void {
   cachedShellEnv = null
+}
+
+/**
+ * Clear cached OpenClaude binary path (for testing)
+ */
+export function clearOpenClaudeEnvCache(): void {
+  cachedOpenClaudePath = null
+  openClaudePathComputed = false
 }
 
 /**
