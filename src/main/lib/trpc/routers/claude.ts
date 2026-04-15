@@ -1211,6 +1211,8 @@ export const claudeRouter = router({
               // -p: print mode (non-interactive)
               // --output-format stream-json: JSON streaming output (requires --verbose)
               // --verbose: enable verbose output for stream-json mode
+              // --resume <session-id>: resume existing session (for continuation)
+              // --continue: continue mode (for first message, no session yet)
               // prompt as positional argument
               const cliArgs = [
                 openClaudePath,
@@ -1218,7 +1220,7 @@ export const claudeRouter = router({
                 "--verbose",
                 "--output-format", "stream-json",
                 ...(resolvedModel ? ["--model", resolvedModel] : []),
-                ...(resumeSessionId ? ["--session-id", resumeSessionId] : []),
+                ...(resumeSessionId ? ["--resume", resumeSessionId] : ["--continue"]),
                 ...(input.mode === "plan" ? ["--permission-mode", "plan"] : []),
                 input.prompt,
               ]
