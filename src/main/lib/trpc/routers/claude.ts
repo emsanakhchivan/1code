@@ -1,16 +1,20 @@
+import { spawn } from "child_process"
 import { observable } from "@trpc/server/observable"
 import { eq } from "drizzle-orm"
 import { app, BrowserWindow, safeStorage } from "electron"
-import * as fs from "fs/promises"
+import * as fs from "fs"
+import * as fsPromises from "fs/promises"
 import * as os from "os"
 import path from "path"
 import { z } from "zod"
 import { setConnectionMethod } from "../../analytics"
 import {
+  buildAgentEnv,
   buildClaudeEnv,
   checkOfflineFallback,
   createTransformer,
   getBundledClaudeBinaryPath,
+  getBundledOpenClaudeBinaryPath,
   logClaudeEnv,
   logRawClaudeMessage,
   type UIMessageChunk,
@@ -295,7 +299,7 @@ async function readProjectMcpJsonCached(
 ): Promise<Record<string, McpServerConfig>> {
   try {
     const mcpJsonPath = path.join(projectPath, ".mcp.json")
-    const stats = await fs.stat(mcpJsonPath).catch(() => null)
+    const stats = await fsPromises.stat(mcpJsonPath).catch(() => null)
     if (!stats) return {}
 
     const cached = projectMcpJsonCache.get(mcpJsonPath)
@@ -1163,6 +1167,122 @@ export const claudeRouter = router({
               prompt = createPromptWithImages()
             }
 
+            // 3. Determine agent binary and environment
+            const agentType = input.agentType || "claude-code"
+            const endpointType = input.customConfig?.endpointType || "anthropic"
+
+            // Build agent environment (includes OpenAI env vars for openclaude + openai-compatible)
+            const agentEnv = buildAgentEnv({
+              agentType,
+              endpointType,
+              profile: finalCustomConfig ? {
+                baseUrl: finalCustomConfig.baseUrl,
+                token: finalCustomConfig.token,
+                models: [{ modelId: finalCustomConfig.model }],
+              } : undefined,
+              enableTasks: input.enableTasks,
+            })
+
+            // Log environment for debugging
+            logClaudeEnv(agentEnv, `[${agentType}] `)
+
+            // 4. Spawn agent process
+            if (agentType === "openclaude") {
+              const openClaudePath = getBundledOpenClaudeBinaryPath()
+
+              // Check if binary exists
+              if (!fs.existsSync(openClaudePath)) {
+                emitError(new Error("OpenClaude CLI not found"), "Binary missing")
+                safeEmit({ type: "finish" } as UIMessageChunk)
+                safeComplete()
+                return
+              }
+
+              console.log(`[${agentType}] Spawning: node ${openClaudePath}`)
+
+              // Start inactivity timer before spawn - catches cases where stream never emits
+              resetInactivityTimer()
+
+              // Spawn OpenClaude via Node.js with --json-stream flag for structured output
+              const childProcess = spawn("node", [openClaudePath, "--json-stream"], {
+                env: agentEnv,
+                stdio: ["pipe", "pipe", "pipe"],
+              })
+
+              // Write prompt to stdin - OpenClaude expects input via stdin
+              const promptInput = JSON.stringify({
+                prompt: input.prompt,
+                cwd: input.cwd,
+                projectPath: input.projectPath,
+                mode: input.mode,
+                sessionId: input.sessionId,
+                model: input.model,
+                images: input.images,
+                historyEnabled,
+                offlineModeEnabled: input.offlineModeEnabled,
+                enableTasks: input.enableTasks,
+              })
+              childProcess.stdin?.write(promptInput + "\n")
+              childProcess.stdin?.end()
+
+              // Handle OpenClaude stdout (JSON stream)
+              const openClaudeTransform = createTransformer({
+                emitSdkMessageUuid: historyEnabled,
+                isUsingOllama: endpointType === "openai-compatible",
+              })
+
+              // Pipe stdout to transformer
+              childProcess.stdout?.on("data", (data: Buffer) => {
+                const lines = data.toString().split("\n")
+                for (const line of lines) {
+                  if (!line.trim()) continue
+                  try {
+                    const chunk = JSON.parse(line)
+                    const transformed = openClaudeTransform(chunk)
+                    for (const t of transformed) {
+                      safeEmit(t)
+                    }
+                  } catch (parseError) {
+                    console.error(`[${agentType}] JSON parse error:`, parseError)
+                  }
+                }
+                resetInactivityTimer()
+              })
+
+              // Handle stderr
+              childProcess.stderr?.on("data", (data: Buffer) => {
+                console.error(`[${agentType}] stderr:`, data.toString())
+              })
+
+              // Handle process exit
+              childProcess.on("exit", (code, signal) => {
+                if (code !== 0 && code !== null) {
+                  emitError(new Error(`Process exited with code ${code}`), "Process crash")
+                }
+                safeEmit({ type: "finish" } as UIMessageChunk)
+                safeComplete()
+                clearInactivityTimer()
+              })
+
+              // Handle process error
+              childProcess.on("error", (err) => {
+                emitError(err, "Spawn error")
+                safeEmit({ type: "finish" } as UIMessageChunk)
+                safeComplete()
+              })
+
+              // Store abort handler
+              abortController.signal.addEventListener("abort", () => {
+                if (childProcess) {
+                  childProcess.kill()
+                }
+              })
+
+              return // Exit the procedure - OpenClaude handling complete
+            }
+
+            // Claude Code - existing SDK query approach continues below...
+
             // Build full environment for Claude SDK (includes HOME, PATH, etc.)
             const claudeEnv = buildClaudeEnv({
               ...(finalCustomConfig && {
@@ -1204,7 +1324,7 @@ export const claudeRouter = router({
             // This is needed because SDK looks for these under $CLAUDE_CONFIG_DIR/
             // OPTIMIZATION: Only create symlinks once per subChatId (cached)
             try {
-              await fs.mkdir(isolatedConfigDir, { recursive: true })
+              await fsPromises.mkdir(isolatedConfigDir, { recursive: true })
 
               // Only create symlinks if not already created for this config dir
               const cacheKey = isUsingOllama ? input.chatId : input.subChatId
@@ -1248,9 +1368,9 @@ export const claudeRouter = router({
 
                     if (sourceExists && !targetExists) {
                       if (targetKind === "dir") {
-                        await fs.symlink(sourcePath, targetPath, symlinkType)
+                        await fsPromises.symlink(sourcePath, targetPath, symlinkType)
                       } else {
-                        await fs.symlink(sourcePath, targetPath)
+                        await fsPromises.symlink(sourcePath, targetPath)
                       }
                     }
 
@@ -1314,7 +1434,7 @@ export const claudeRouter = router({
               // OPTIMIZATION: Cache configs by file mtime to avoid re-parsing on every message
               const claudeJsonSource = path.join(os.homedir(), ".claude.json")
               try {
-                const stats = await fs.stat(claudeJsonSource).catch(() => null)
+                const stats = await fsPromises.stat(claudeJsonSource).catch(() => null)
                 const currentMtime = stats?.mtimeMs ?? 0
                 const cached = mcpConfigCache.get(claudeJsonSource)
                 const lookupPath = input.projectPath || input.cwd
@@ -1325,7 +1445,7 @@ export const claudeRouter = router({
                   claudeConfig = cached.config
                 } else if (stats) {
                   claudeConfig = JSON.parse(
-                    await fs.readFile(claudeJsonSource, "utf-8"),
+                    await fsPromises.readFile(claudeJsonSource, "utf-8"),
                   )
                   mcpConfigCache.set(claudeJsonSource, {
                     config: claudeConfig,
@@ -1506,7 +1626,7 @@ export const claudeRouter = router({
             let agentsMdContent: string | undefined
             try {
               const agentsMdPath = path.join(input.cwd, "AGENTS.md")
-              agentsMdContent = await fs.readFile(agentsMdPath, "utf-8")
+              agentsMdContent = await fsPromises.readFile(agentsMdPath, "utf-8")
               if (!agentsMdContent.trim()) {
                 agentsMdContent = undefined
               }
