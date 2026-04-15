@@ -1,9 +1,10 @@
 import { useAtom, useAtomValue, useSetAtom } from "jotai"
-import { ChevronDown, Edit2, MoreHorizontal, Plus, Trash2, Check, Settings, Clock } from "lucide-react"
+import { ChevronDown, Edit2, MoreHorizontal, Plus, Trash2, Check, Settings, Clock, Zap } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
   agentsLoginModalOpenAtom,
+  agentTypeAtom,
   claudeLoginModalConfigAtom,
   codexApiKeyAtom,
   codexLoginModalOpenAtom,
@@ -22,6 +23,7 @@ import {
   createModelIdentifier,
   getModelDisplayName,
 } from "../../../lib/atoms"
+import { cn } from "../../../lib/utils"
 import { ClaudeCodeIcon, CodexIcon, SearchIcon } from "../../ui/icons"
 import { CLAUDE_MODELS, CODEX_MODELS } from "../../../features/agents/lib/models"
 import { trpc } from "../../../lib/trpc"
@@ -40,6 +42,7 @@ import {
 } from "../../ui/dropdown-menu"
 import { Input } from "../../ui/input"
 import { Label } from "../../ui/label"
+import { RadioGroupItem } from "../../ui/radio-group"
 import { Switch } from "../../ui/switch"
 
 // Hook to detect narrow screen
@@ -520,6 +523,7 @@ function AnthropicAccountsSection() {
 }
 
 export function AgentsModelsTab() {
+  const [agentType, setAgentType] = useAtom(agentTypeAtom)
   const setClaudeLoginModalConfig = useSetAtom(claudeLoginModalConfigAtom)
   const setClaudeLoginModalOpen = useSetAtom(agentsLoginModalOpenAtom)
   const setCodexLoginModalOpen = useSetAtom(codexLoginModalOpenAtom)
@@ -888,6 +892,71 @@ export function AgentsModelsTab() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
+      </div>
+
+      {/* Agent Type Selection */}
+      <div className="space-y-4 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <Label className="text-sm font-medium">Agent Type</Label>
+            <p className="text-xs text-muted-foreground mt-1">
+              Choose which CLI to use for AI responses
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div
+            className={cn(
+              "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+              agentType === "claude-code"
+                ? "border-primary bg-primary/5"
+                : "border-border hover:border-muted-foreground/50"
+            )}
+            onClick={() => setAgentType("claude-code")}
+          >
+            <RadioGroupItem
+              value="claude-code"
+              checked={agentType === "claude-code"}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">Claude Code</span>
+                <span className="text-xs text-muted-foreground">(Default)</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Anthropic Claude models via official SDK
+              </p>
+            </div>
+          </div>
+
+          <div
+            className={cn(
+              "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+              agentType === "openclaude"
+                ? "border-primary bg-primary/5"
+                : "border-border hover:border-muted-foreground/50"
+            )}
+            onClick={() => setAgentType("openclaude")}
+          >
+            <RadioGroupItem
+              value="openclaude"
+              checked={agentType === "openclaude"}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4" />
+                <span className="font-medium">OpenClaude</span>
+                <Badge variant="outline" className="text-xs">Beta</Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                OpenAI-compatible endpoints: Ollama, Gemini, Together, etc.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
