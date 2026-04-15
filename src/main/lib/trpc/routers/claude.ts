@@ -1199,8 +1199,6 @@ export const claudeRouter = router({
               }
 
               console.log(`[${agentType}] Spawning: node ${openClaudePath}`)
-              console.log(`[${agentType}] CLI args:`, cliArgs.join(" "))
-              console.log(`[${agentType}] Spawn cwd:`, spawnCwd)
 
               // Start inactivity timer before spawn - catches cases where stream never emits
               resetInactivityTimer()
@@ -1234,6 +1232,11 @@ export const claudeRouter = router({
                 ...agentEnv,
                 CLAUDE_CODE_CWD: input.cwd,
               }
+
+              // Debug logging AFTER declarations
+              console.log(`[${agentType}] CLI args:`, cliArgs.join(" "))
+              console.log(`[${agentType}] Spawn cwd:`, spawnCwd)
+              console.log(`[${agentType}] Spawn env CLAUDE_CODE_CWD:`, spawnEnv.CLAUDE_CODE_CWD)
 
               const childProcess = spawn("node", cliArgs, {
                 env: spawnEnv,
