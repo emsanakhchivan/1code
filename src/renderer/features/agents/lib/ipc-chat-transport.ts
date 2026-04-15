@@ -17,6 +17,8 @@ import {
   subChatCustomModelIdAtomFamily,
   normalizeCustomClaudeConfig,
   customClaudeConfigAtom,
+  agentTypeAtom,
+  EndpointType,
 } from "../../../lib/atoms"
 import { appStore } from "../../../lib/jotai-store"
 import { trpcClient } from "../../../lib/trpc"
@@ -186,6 +188,13 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
     const networkOnline = appStore.get(networkOnlineAtom)
     const autoOffline = appStore.get(autoOfflineModeAtom)
 
+    // Read agent type from atom
+    const agentType = appStore.get(agentTypeAtom)
+
+    // Determine endpoint type from selected profile
+    const activeProfile = profiles.find(p => p.id === subChatProfileId)
+    const endpointType: EndpointType = activeProfile?.endpointType || "anthropic"
+
     let customConfig: { model: string; token: string; baseUrl: string; profileId?: string; profileName?: string } | undefined = undefined
 
     // Priority 1: If auto-offline enabled and no internet, use offline profile
@@ -264,12 +273,18 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
             sessionId,
             ...(maxThinkingTokens && { maxThinkingTokens }),
             ...(modelString && { model: modelString }),
-            ...(customConfig && { customConfig }),
+            ...(customConfig && {
+              customConfig: {
+                ...customConfig,
+                endpointType, // Add endpoint type to customConfig
+              }
+            }),
             ...(selectedOllamaModel && { selectedOllamaModel }),
             historyEnabled,
             offlineModeEnabled,
             enableTasks,
             ...(images.length > 0 && { images }),
+            agentType, // Pass agent type
           },
           {
             onData: (chunk: UIMessageChunk) => {
