@@ -1030,6 +1030,10 @@ export const claudeRouter = router({
             const finalCustomConfig = offlineResult.config || input.customConfig
             const isUsingOllama = offlineResult.isUsingOllama
 
+            // Resolve session and model for both branches (SDK and OpenClaude)
+            const resumeSessionId = input.sessionId || existingSessionId || undefined
+            const resolvedModel = finalCustomConfig?.model || input.model
+
             // Track connection method for analytics
             let connectionMethod = "claude-subscription" // default (Claude Code OAuth)
             if (isUsingOllama) {
@@ -1213,8 +1217,8 @@ export const claudeRouter = router({
                 "-p",
                 "--verbose",
                 "--output-format", "stream-json",
-                ...(input.model ? ["--model", input.model] : []),
-                ...(input.sessionId ? ["--session-id", input.sessionId] : []),
+                ...(resolvedModel ? ["--model", resolvedModel] : []),
+                ...(resumeSessionId ? ["--session-id", resumeSessionId] : []),
                 ...(input.mode === "plan" ? ["--permission-mode", "plan"] : []),
                 input.prompt,
               ]
@@ -1750,9 +1754,6 @@ export const claudeRouter = router({
             // Get bundled Claude binary path
             const claudeBinaryPath = getBundledClaudeBinaryPath()
 
-            const resumeSessionId =
-              input.sessionId || existingSessionId || undefined
-
             if (finalCustomConfig) {
               const redactedConfig = {
                 ...finalCustomConfig,
@@ -1768,10 +1769,6 @@ export const claudeRouter = router({
                 )
               }
             }
-
-            const resolvedModel = finalCustomConfig?.model || input.model
-
-            // Skip MCP servers entirely in offline mode (Ollama) - they slow down initialization by 60+ seconds
 
             // Skip MCP servers entirely in offline mode (Ollama) - they slow down initialization by 60+ seconds
             // Otherwise pass all MCP servers - the SDK will handle connection
