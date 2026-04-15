@@ -1205,11 +1205,13 @@ export const claudeRouter = router({
 
               // Build CLI arguments for OpenClaude
               // -p: print mode (non-interactive)
-              // --output-format stream-json: JSON streaming output
+              // --output-format stream-json: JSON streaming output (requires --verbose)
+              // --verbose: enable verbose output for stream-json mode
               // prompt as positional argument
               const cliArgs = [
                 openClaudePath,
                 "-p",
+                "--verbose",
                 "--output-format", "stream-json",
                 ...(input.model ? ["--model", input.model] : []),
                 ...(input.sessionId ? ["--session-id", input.sessionId] : []),
