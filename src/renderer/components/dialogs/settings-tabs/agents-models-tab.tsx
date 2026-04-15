@@ -17,6 +17,7 @@ import {
   openaiApiKeyAtom,
   type ModelProfile,
   type CustomModelConfig,
+  type EndpointType,
   defaultModelForNewChatsAtom,
   lastUsedModelAtom,
   parseModelIdentifier,
@@ -43,6 +44,13 @@ import {
 import { Input } from "../../ui/input"
 import { Label } from "../../ui/label"
 import { RadioGroupItem } from "../../ui/radio-group"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../ui/select"
 import { Switch } from "../../ui/switch"
 
 // Hook to detect narrow screen
@@ -128,6 +136,7 @@ function CustomProfileDialog({
   const [token, setToken] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [models, setModels] = useState<CustomModelConfig[]>([])
+  const [endpointType, setEndpointType] = useState<EndpointType>("anthropic")
 
   useEffect(() => {
     if (profile) {
@@ -135,11 +144,13 @@ function CustomProfileDialog({
       setToken(profile.token)
       setBaseUrl(profile.baseUrl)
       setModels(profile.models.length > 0 ? profile.models : [])
+      setEndpointType(profile.endpointType || "anthropic")
     } else {
       setName('')
       setToken('')
       setBaseUrl('')
       setModels([])
+      setEndpointType("anthropic")
     }
   }, [profile, open])
 
@@ -200,6 +211,7 @@ function CustomProfileDialog({
         name: m.name.trim(),
         modelId: m.modelId.trim(),
       })),
+      endpointType,
     })
     onOpenChange(false)
   }
@@ -235,6 +247,28 @@ function CustomProfileDialog({
               onChange={(e) => setBaseUrl(e.target.value)}
               placeholder="https://openrouter.ai/api/v1"
             />
+          </div>
+          {/* Endpoint Type */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Endpoint Type</Label>
+            <Select value={endpointType} onValueChange={(v) => setEndpointType(v as EndpointType)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="anthropic">
+                  Anthropic Messages API
+                </SelectItem>
+                <SelectItem value="openai-compatible">
+                  OpenAI-compatible (/v1, Ollama, Gemini)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            {endpointType === "openai-compatible" && (
+              <p className="text-xs text-orange-500">
+                Requires OpenClaude agent mode
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label className="text-sm font-medium">API Token</Label>
