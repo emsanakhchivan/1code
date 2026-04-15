@@ -43,7 +43,7 @@ import {
 } from "../../ui/dropdown-menu"
 import { Input } from "../../ui/input"
 import { Label } from "../../ui/label"
-import { RadioGroupItem } from "../../ui/radio-group"
+import { RadioGroup, RadioGroupItem } from "../../ui/radio-group"
 import {
   Select,
   SelectContent,
@@ -959,7 +959,11 @@ export function AgentsModelsTab() {
           </div>
         </div>
 
-        <div className="space-y-3">
+        <RadioGroup
+          value={agentType}
+          onValueChange={(v) => handleAgentTypeChange(v as "claude-code" | "openclaude")}
+          className="space-y-3"
+        >
           <div
             className={cn(
               "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
@@ -971,7 +975,6 @@ export function AgentsModelsTab() {
           >
             <RadioGroupItem
               value="claude-code"
-              checked={agentType === "claude-code"}
               className="mt-0.5"
             />
             <div className="flex-1">
@@ -996,7 +999,6 @@ export function AgentsModelsTab() {
           >
             <RadioGroupItem
               value="openclaude"
-              checked={agentType === "openclaude"}
               className="mt-0.5"
             />
             <div className="flex-1">
@@ -1010,7 +1012,7 @@ export function AgentsModelsTab() {
               </p>
             </div>
           </div>
-        </div>
+        </RadioGroup>
       </div>
 
       {/* ===== Models Section ===== */}
