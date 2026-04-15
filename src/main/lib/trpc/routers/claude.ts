@@ -1220,10 +1220,22 @@ export const claudeRouter = router({
               ]
 
               // Spawn OpenClaude via Node.js
-              // cwd passed via spawn options, not CLI argument
+              // In dev mode, cwd must be oclaude project for dependency resolution
+              // User's cwd passed via environment (CLAUDE_CODE_CWD)
+              const isDev = !app.isPackaged
+              const spawnCwd = isDev
+                ? "C:/Users/test/Documents/Projects/oclaude"
+                : input.cwd
+
+              // Add cwd to environment for OpenClaude
+              const spawnEnv = {
+                ...agentEnv,
+                CLAUDE_CODE_CWD: input.cwd,
+              }
+
               const childProcess = spawn("node", cliArgs, {
-                env: agentEnv,
-                cwd: input.cwd,
+                env: spawnEnv,
+                cwd: spawnCwd,
                 stdio: ["pipe", "pipe", "pipe"],
               })
 

@@ -111,6 +111,7 @@ let openClaudePathComputed = false
 /**
  * Get path to the bundled OpenClaude CLI binary.
  * OpenClaude is a Node.js .mjs file that requires Node to run.
+ * In dev mode, use the CLI directly from the oclaude project to resolve dependencies.
  */
 export function getBundledOpenClaudeBinaryPath(): string {
   if (openClaudePathComputed) {
@@ -126,11 +127,21 @@ export function getBundledOpenClaudeBinaryPath(): string {
   console.log("[openclaude-binary] platform:", currentPlatform)
   console.log("[openclaude-binary] arch:", arch)
 
-  const resourcesPath = isDev
-    ? path.join(app.getAppPath(), "resources/bin", `${currentPlatform}-${arch}`)
-    : path.join(process.resourcesPath, "bin")
+  // In dev mode, use CLI directly from oclaude project (resolves dependencies correctly)
+  // In production, use bundled binary
+  let binaryPath: string
 
-  const binaryPath = path.join(resourcesPath, "openclaude.mjs")
+  if (isDev) {
+    // Dev mode: use oclaude project's CLI directly
+    const oclaudePath = "C:/Users/test/Documents/Projects/oclaude"
+    binaryPath = path.join(oclaudePath, "dist/cli.mjs")
+    console.log("[openclaude-binary] Dev mode - using oclaude project CLI")
+  } else {
+    // Production: use bundled binary
+    const resourcesPath = path.join(process.resourcesPath, "bin")
+    binaryPath = path.join(resourcesPath, "openclaude.mjs")
+    console.log("[openclaude-binary] Production mode - using bundled binary")
+  }
 
   console.log("[openclaude-binary] binaryPath:", binaryPath)
 
