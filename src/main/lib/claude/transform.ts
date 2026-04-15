@@ -46,6 +46,10 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
   // Includes iterations for server-side tool loops (WebSearch, etc.)
   let lastMainAssistantUsage: Usage | null = null
 
+  // Track model info from session-init and assistant messages (OpenClaude sends model name)
+  let currentModelId: string | null = null
+  let currentModelProvider: string | null = null
+
   // Helper to create composite toolCallId: "parentId:childId" or just "childId"
   const makeCompositeId = (originalId: string, parentId: string | null): string => {
     if (parentId) return `${parentId}:${originalId}`
@@ -262,6 +266,11 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
           iterations: usage.iterations ?? undefined,
         }
       }
+
+      // Extract model from assistant message (OpenClaude sends model name per message)
+      if (msg.message?.model && !currentModelId) {
+        currentModelId = msg.message.model
+      }
     }
 
     // ===== ASSISTANT MESSAGE (complete, often with tool_use) =====
@@ -378,8 +387,24 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
 
     // ===== SYSTEM STATUS (compacting, etc.) =====
     if (msg.type === "system") {
-      // Session init - extract MCP servers, plugins, tools
+      // Session init - extract MCP servers, plugins, tools, and model info
       if (msg.subtype === "init") {
+        // Extract model info from session-init (OpenClaude sends model name here)
+        if (msg.model) {
+          currentModelId = msg.model
+          // Determine provider from model name or apiKeySource
+          const apiKeySource = msg.apiKeySource || ""
+          if (apiKeySource.includes("ANTHROPIC")) {
+            currentModelProvider = "anthropic"
+          } else if (apiKeySource.includes("OPENAI") || isUsingOllama) {
+            currentModelProvider = "openai"
+          } else if (msg.model.includes("glm") || msg.model.includes("kimi")) {
+            currentModelProvider = "custom"
+          } else {
+            currentModelProvider = "anthropic" // Default
+          }
+        }
+
         // Map MCP servers with validated status type and additional info
         const mcpServers: MCPServer[] = (msg.mcp_servers || []).map(
           (s: { name: string; status: string; serverInfo?: { name: string; version: string; icons?: { src: string; mimeType?: string; sizes?: string[]; theme?: "light" | "dark" }[] }; error?: string }) => ({
@@ -444,6 +469,16 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
       yield* endTextBlock()
       yield* endToolInput()
 
+      // Extract model info from modelUsage (OpenClaude sends this in result)
+      const modelUsage = msg.modelUsage
+      if (modelUsage) {
+        // Extract modelId from modelUsage keys (e.g., {"glm-5": {...}})
+        const modelKeys = Object.keys(modelUsage)
+        if (modelKeys.length > 0 && !currentModelId) {
+          currentModelId = modelKeys[0]
+        }
+      }
+
       const resultOutputTokens = msg.usage?.output_tokens
       const fallbackUsage: Usage = {
         input_tokens: msg.usage?.input_tokens ?? 0,
@@ -484,6 +519,9 @@ export function createTransformer(options?: { isUsingOllama?: boolean }) {
         resultSubtype: msg.subtype || "success",
         // Include finalTextId for collapsing tools when there's a final response
         finalTextId: lastTextId || undefined,
+        // Model info (from session-init, assistant message, or modelUsage)
+        modelId: currentModelId || undefined,
+        modelProvider: currentModelProvider || undefined,
       }
       console.log("[transform.ts] Yielding message-metadata:", {
         inputTokens: metadata.inputTokens,
