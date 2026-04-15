@@ -356,12 +356,16 @@ export function buildAgentEnv(options: {
     enableTasks: options.enableTasks,
   })
 
-  // OpenClaude with custom profile - set appropriate env vars based on endpointType
+  // OpenClaude with custom profile
   if (options.agentType === "openclaude" && options.profile) {
-    const endpointType = options.endpointType || "anthropic"
+    // Check if baseUrl is default Anthropic URL
+    const isAnthropicUrl = !options.profile.baseUrl ||
+      options.profile.baseUrl.includes("api.anthropic.com")
 
-    if (endpointType === "openai-compatible") {
-      // OpenAI-compatible: use OpenAI env vars
+    // For custom baseUrl (not Anthropic), always use OpenAI mode
+    // This skips model validation which Anthropic mode does
+    // Custom endpoints with custom models need this regardless of endpointType
+    if (!isAnthropicUrl) {
       return {
         ...baseEnv,
         CLAUDE_CODE_USE_OPENAI: "true",
@@ -369,14 +373,14 @@ export function buildAgentEnv(options: {
         OPENAI_API_KEY: options.profile.token,
         OPENAI_MODEL: options.profile.models[0]?.modelId || "",
       }
-    } else {
-      // Anthropic endpoint: use ANTHROPIC env vars
-      return {
-        ...baseEnv,
-        ANTHROPIC_AUTH_TOKEN: options.profile.token,
-        ANTHROPIC_BASE_URL: options.profile.baseUrl,
-        ANTHROPIC_DEFAULT_MODEL: options.profile.models[0]?.modelId || "",
-      }
+    }
+
+    // For true Anthropic API, use Anthropic env vars
+    return {
+      ...baseEnv,
+      ANTHROPIC_AUTH_TOKEN: options.profile.token,
+      ANTHROPIC_BASE_URL: options.profile.baseUrl,
+      ANTHROPIC_DEFAULT_MODEL: options.profile.models[0]?.modelId || "",
     }
   }
 
