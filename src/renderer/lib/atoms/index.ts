@@ -231,6 +231,9 @@ export type CustomModelConfig = {
   modelId: string    // API model ID (e.g., "anthropic/claude-3-opus")
 }
 
+// Endpoint type for API compatibility
+export type EndpointType = "anthropic" | "openai-compatible"
+
 // Model profile system - support multiple models per profile
 export type ModelProfile = {
   id: string
@@ -238,6 +241,7 @@ export type ModelProfile = {
   baseUrl: string        // API endpoint
   token: string          // API key
   models: CustomModelConfig[]  // Multiple models
+  endpointType?: EndpointType  // API endpoint type, default "anthropic"
   isOffline?: boolean    // Mark as offline/Ollama profile
 }
 
@@ -304,9 +308,13 @@ export const openaiApiKeyAtom = atomWithStorage<string>(
 function migrateProfile(profile: any): ModelProfile {
   // If already has models array, it's the new structure
   if (profile.models && Array.isArray(profile.models)) {
+    // Ensure endpointType is set (default to anthropic for migrated profiles)
+    if (!profile.endpointType) {
+      profile.endpointType = "anthropic"
+    }
     return profile as ModelProfile
   }
-  
+
   // If has old config structure, migrate to new structure
   if (profile.config) {
     return {
@@ -319,12 +327,13 @@ function migrateProfile(profile: any): ModelProfile {
         name: profile.config.model || profile.name,
         modelId: profile.config.model || '',
       }],
+      endpointType: "anthropic", // default for migrated
       isOffline: profile.isOffline,
     }
   }
-  
+
   // Fallback for malformed profiles
-  return profile as ModelProfile
+  return { ...profile, endpointType: "anthropic" } as ModelProfile
 }
 
 // New: Model profiles storage with migration
@@ -605,6 +614,14 @@ export const enableTasksAtom = atomWithStorage<boolean>(
 export const betaUpdatesEnabledAtom = atomWithStorage<boolean>(
   "preferences:beta-updates-enabled",
   false, // Default OFF - only stable releases
+  undefined,
+  { getOnInit: true },
+)
+
+// Agent type selection - global setting (claude-code vs openclaude)
+export const agentTypeAtom = atomWithStorage<"claude-code" | "openclaude">(
+  "agents:agent-type",
+  "claude-code",  // default
   undefined,
   { getOnInit: true },
 )
