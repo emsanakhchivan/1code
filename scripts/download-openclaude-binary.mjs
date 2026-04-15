@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT_DIR = path.join(__dirname, "..")
 const BIN_DIR = path.join(ROOT_DIR, "resources", "bin")
-const CLI_ENTRYPOINT = "resources/cli.mjs"
+const CLI_ENTRYPOINT = "dist/cli.mjs"
 
 // Default local path for development
 const DEFAULT_LOCAL_PATH = "C:/Users/test/Documents/Projects/oclaude"

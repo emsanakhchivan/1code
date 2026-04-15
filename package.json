@@ -28,6 +28,7 @@
     "claude:download:all": "node scripts/download-claude-binary.mjs --version=2.1.45 --all",
     "codex:download": "node scripts/download-codex-binary.mjs --version=0.98.0",
     "codex:download:all": "node scripts/download-codex-binary.mjs --version=0.98.0 --all",
+    "openclaude:download": "node scripts/download-openclaude-binary.mjs",
     "release": "rm -rf release && bun i && bun run claude:download && bun run codex:download && bun run build && bun run package:mac && bun run dist:manifest && ./scripts/upload-release-wrangler.sh",
     "release:dev": "rm -rf release && bun run claude:download && bun run codex:download && bun run build && bun run package:mac && rm -rf node_modules && bun i",
     "sync:public": "./scripts/sync-to-public.sh",
@@ -37,7 +38,7 @@
     "db:studio": "drizzle-kit studio",
     "ts:check": "tsgo --noEmit",
     "rebuild": "electron-rebuild -f -w better-sqlite3,node-pty",
-    "postinstall": "node scripts/postinstall.mjs"
+    "postinstall": "bun run claude:download && bun run openclaude:download"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.14",
