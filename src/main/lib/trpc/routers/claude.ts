@@ -1203,26 +1203,29 @@ export const claudeRouter = router({
               // Start inactivity timer before spawn - catches cases where stream never emits
               resetInactivityTimer()
 
-              // Spawn OpenClaude via Node.js with --json-stream flag for structured output
-              const childProcess = spawn("node", [openClaudePath, "--json-stream"], {
+              // Build CLI arguments for OpenClaude
+              // -p: print mode (non-interactive)
+              // --output-format stream-json: JSON streaming output
+              // prompt as positional argument
+              const cliArgs = [
+                openClaudePath,
+                "-p",
+                "--output-format", "stream-json",
+                ...(input.model ? ["--model", input.model] : []),
+                ...(input.sessionId ? ["--session-id", input.sessionId] : []),
+                ...(input.mode === "plan" ? ["--permission-mode", "plan"] : []),
+                input.prompt,
+              ]
+
+              // Spawn OpenClaude via Node.js
+              // cwd passed via spawn options, not CLI argument
+              const childProcess = spawn("node", cliArgs, {
                 env: agentEnv,
+                cwd: input.cwd,
                 stdio: ["pipe", "pipe", "pipe"],
               })
 
-              // Write prompt to stdin - OpenClaude expects input via stdin
-              const promptInput = JSON.stringify({
-                prompt: input.prompt,
-                cwd: input.cwd,
-                projectPath: input.projectPath,
-                mode: input.mode,
-                sessionId: input.sessionId,
-                model: input.model,
-                images: input.images,
-                historyEnabled,
-                offlineModeEnabled: input.offlineModeEnabled,
-                enableTasks: input.enableTasks,
-              })
-              childProcess.stdin?.write(promptInput + "\n")
+              // Close stdin immediately - prompt passed via CLI argument
               childProcess.stdin?.end()
 
               // Handle OpenClaude stdout (JSON stream)
