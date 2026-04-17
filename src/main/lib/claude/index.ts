@@ -11,10 +11,8 @@ export {
   clearClaudeEnvCache,
   logClaudeEnv,
   getBundledClaudeBinaryPath,
-  getBundledOpenClaudeBinaryPath,
   getOpenClaudeSDK,
   buildAgentEnv,
-  clearOpenClaudeEnvCache,
   clearOpenClaudeSDKCache,
 } from "./env"
 export { checkOfflineFallback } from "./offline-handler"

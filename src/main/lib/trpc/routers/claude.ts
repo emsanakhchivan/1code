@@ -13,7 +13,6 @@ import {
   checkOfflineFallback,
   createTransformer,
   getBundledClaudeBinaryPath,
-  getBundledOpenClaudeBinaryPath,
   getOpenClaudeSDK,
   logClaudeEnv,
   logRawClaudeMessage,

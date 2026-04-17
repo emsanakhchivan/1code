@@ -104,62 +104,6 @@ export function getBundledClaudeBinaryPath(): string {
   return binaryPath
 }
 
-// Cache for OpenClaude binary path
-let cachedOpenClaudePath: string | null = null
-let openClaudePathComputed = false
-
-/**
- * Get path to the bundled OpenClaude CLI binary.
- * OpenClaude is a Node.js .mjs file that requires Node to run.
- * In dev mode, use the CLI directly from the oclaude project to resolve dependencies.
- */
-export function getBundledOpenClaudeBinaryPath(): string {
-  if (openClaudePathComputed) {
-    return cachedOpenClaudePath!
-  }
-
-  const isDev = !app.isPackaged
-  const currentPlatform = process.platform
-  const arch = process.arch
-
-  console.log("[openclaude-binary] ========== BUNDLED BINARY DEBUG ==========")
-  console.log("[openclaude-binary] isDev:", isDev)
-  console.log("[openclaude-binary] platform:", currentPlatform)
-  console.log("[openclaude-binary] arch:", arch)
-
-  // In dev mode, use CLI directly from oclaude project (resolves dependencies correctly)
-  // In production, use bundled binary
-  let binaryPath: string
-
-  if (isDev) {
-    // Dev mode: use oclaude project's CLI directly
-    const oclaudePath = "C:/Users/test/Documents/Projects/oclaude"
-    binaryPath = path.join(oclaudePath, "dist/cli.mjs")
-    console.log("[openclaude-binary] Dev mode - using oclaude project CLI")
-  } else {
-    // Production: use bundled binary
-    const resourcesPath = path.join(process.resourcesPath, "bin")
-    binaryPath = path.join(resourcesPath, "openclaude.mjs")
-    console.log("[openclaude-binary] Production mode - using bundled binary")
-  }
-
-  console.log("[openclaude-binary] binaryPath:", binaryPath)
-
-  const exists = fs.existsSync(binaryPath)
-  if (!exists) {
-    console.error("[openclaude-binary] WARNING: Binary not found at path:", binaryPath)
-    console.error("[openclaude-binary] Run 'bun run openclaude:download' to download it")
-  } else {
-    console.log("[openclaude-binary] exists:", exists)
-  }
-  console.log("[openclaude-binary] ============================================")
-
-  cachedOpenClaudePath = binaryPath
-  openClaudePathComputed = true
-
-  return binaryPath
-}
-
 // Cache for OpenClaude SDK query function
 let cachedOpenClaudeQuery: ((params: { prompt: string | AsyncIterable<any>; options?: any }) => AsyncIterable<any>) | null = null
 
@@ -424,14 +368,6 @@ export function buildAgentEnv(options: {
  */
 export function clearClaudeEnvCache(): void {
   cachedShellEnv = null
-}
-
-/**
- * Clear cached OpenClaude binary path (for testing)
- */
-export function clearOpenClaudeEnvCache(): void {
-  cachedOpenClaudePath = null
-  openClaudePathComputed = false
 }
 
 /**

@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT_DIR = path.join(__dirname, "..")
 const BIN_DIR = path.join(ROOT_DIR, "resources", "bin")
-const CLI_ENTRYPOINT = "dist/cli.mjs"
+const SDK_ENTRYPOINT = "dist/sdk.mjs"
 
 // Default local path for development
 const DEFAULT_LOCAL_PATH = "C:/Users/test/Documents/Projects/oclaude"
@@ -59,16 +59,16 @@ async function downloadFromReleases(version) {
 }
 
 async function copyFromLocal(localPath) {
-  const sourcePath = path.join(localPath, CLI_ENTRYPOINT)
+  const sourcePath = path.join(localPath, SDK_ENTRYPOINT)
 
   if (!fs.existsSync(sourcePath)) {
     console.error(`[openclaude] Source file not found: ${sourcePath}`)
-    console.error("[openclaude] Make sure the oclaude project has resources/cli.mjs")
+    console.error("[openclaude] Make sure the oclaude project has dist/sdk.mjs")
     return false
   }
 
   const targetDir = path.join(BIN_DIR, `${process.platform}-${process.arch}`)
-  const targetPath = path.join(targetDir, "openclaude.mjs")
+  const targetPath = path.join(targetDir, "openclaude-sdk.mjs")
 
   // Create target directory
   fs.mkdirSync(targetDir, { recursive: true })
@@ -90,12 +90,12 @@ async function copyFromLocal(localPath) {
 }
 
 async function main() {
-  console.log("OpenClaude CLI Binary Downloader/Copier")
-  console.log("========================================\n")
+  console.log("OpenClaude SDK Downloader/Copier")
+  console.log("=================================\n")
 
   const options = parseArgs()
   const targetDir = path.join(BIN_DIR, `${process.platform}-${process.arch}`)
-  const targetPath = path.join(targetDir, "openclaude.mjs")
+  const targetPath = path.join(targetDir, "openclaude-sdk.mjs")
 
   console.log(`Platform: ${process.platform}-${process.arch}`)
   console.log(`Target: ${targetPath}`)
@@ -106,7 +106,7 @@ async function main() {
   if (options.localPath) {
     const success = await copyFromLocal(options.localPath)
     if (success) {
-      console.log("\n✓ OpenClaude CLI ready!")
+      console.log("\n✓ OpenClaude SDK ready!")
       return
     }
   }
@@ -115,19 +115,19 @@ async function main() {
   if (options.version) {
     const success = await downloadFromReleases(options.version)
     if (success) {
-      console.log("\n✓ OpenClaude CLI downloaded!")
+      console.log("\n✓ OpenClaude SDK downloaded!")
       return
     }
   }
 
   // Check if file already exists
   if (fs.existsSync(targetPath)) {
-    console.log(`\n✓ OpenClaude CLI already exists at: ${targetPath}`)
+    console.log(`\n✓ OpenClaude SDK already exists at: ${targetPath}`)
     console.log("  (No download/copy needed)")
     return
   }
 
-  console.error("\n✗ Could not obtain OpenClaude CLI")
+  console.error("\n✗ Could not obtain OpenClaude SDK")
   console.error("  Run with --local-path pointing to your oclaude project")
   process.exit(1)
 }
