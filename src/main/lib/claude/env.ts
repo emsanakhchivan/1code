@@ -3,6 +3,7 @@ import { execSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { stripVTControlCharacters } from "node:util"
 import {
   getDefaultShell,
@@ -121,8 +122,11 @@ export async function getOpenClaudeSDK(): Promise<(params: { prompt: string | As
 
   console.log("[openclaude-sdk] Loading SDK from:", sdkPath)
 
+  // On Windows, dynamic import requires a valid file:// URL
+  const sdkUrl = pathToFileURL(sdkPath).href
+
   try {
-    const sdk = await import(sdkPath)
+    const sdk = await import(sdkUrl)
     const queryFn = sdk.query as (params: { prompt: string | AsyncIterable<any>; options?: any }) => AsyncIterable<any>
     if (!queryFn) {
       throw new Error("SDK module does not export 'query' function")
