@@ -1,4 +1,3 @@
-import { spawn } from "child_process"
 import { observable } from "@trpc/server/observable"
 import { eq } from "drizzle-orm"
 import { app, BrowserWindow, safeStorage } from "electron"
@@ -15,6 +14,7 @@ import {
   createTransformer,
   getBundledClaudeBinaryPath,
   getBundledOpenClaudeBinaryPath,
+  getOpenClaudeSDK,
   logClaudeEnv,
   logRawClaudeMessage,
   type UIMessageChunk,
@@ -1190,75 +1190,43 @@ export const claudeRouter = router({
             // Log environment for debugging
             logClaudeEnv(agentEnv, `[${agentType}] `)
 
-            // 4. Spawn agent process
+            // 4. Run OpenClaude SDK query
             if (agentType === "openclaude") {
-              const openClaudePath = getBundledOpenClaudeBinaryPath()
+              console.log(`[${agentType}] Starting SDK query`)
 
-              // Check if binary exists
-              if (!fs.existsSync(openClaudePath)) {
-                emitError(new Error("OpenClaude CLI not found"), "Binary missing")
+              // Start inactivity timer before query - catches cases where stream never emits
+              resetInactivityTimer()
+
+              // Get the SDK query function
+              let openClaudeQuery: (params: { prompt: string | AsyncIterable<any>; options?: any }) => AsyncIterable<any>
+              try {
+                openClaudeQuery = await getOpenClaudeSDK()
+              } catch (sdkLoadError) {
+                console.error(`[${agentType}] Failed to load SDK:`, sdkLoadError)
+                emitError(sdkLoadError, "SDK load failed")
                 safeEmit({ type: "finish" } as UIMessageChunk)
                 safeComplete()
                 return
               }
 
-              console.log(`[${agentType}] Spawning: node ${openClaudePath}`)
-
-              // Start inactivity timer before spawn - catches cases where stream never emits
-              resetInactivityTimer()
-
-              // Build CLI arguments for OpenClaude
-              // -p: print mode (non-interactive)
-              // --output-format stream-json: JSON streaming output (requires --verbose)
-              // --verbose: enable verbose output for stream-json mode
-              // For NEW chats: --continue (no session yet)
-              // For EXISTING chats: --resume <id> --fork-session (resume history but fork to new ID)
-              // --fork-session avoids "session already in use" error
-              // prompt as positional argument
-              const cliArgs = [
-                openClaudePath,
-                "-p",
-                "--verbose",
-                "--output-format", "stream-json",
-                ...(resolvedModel ? ["--model", resolvedModel] : []),
-                ...(resumeSessionId
-                  ? ["--resume", resumeSessionId, "--fork-session"]
-                  : ["--continue"]),
-                ...(input.mode === "plan" ? ["--permission-mode", "plan"] : []),
-                input.prompt,
-              ]
-
-              // Spawn OpenClaude via Node.js
-              // In dev mode, cwd must be oclaude project for dependency resolution
-              // User's cwd passed via environment (CLAUDE_CODE_CWD)
-              const isDev = !app.isPackaged
-              const spawnCwd = isDev
-                ? "C:/Users/test/Documents/Projects/oclaude"
-                : input.cwd
-
-              // Add cwd to environment for OpenClaude
-              const spawnEnv = {
-                ...agentEnv,
-                CLAUDE_CODE_CWD: input.cwd,
+              // Build SDK options for OpenClaude
+              const sdkOptions = {
+                cwd: input.cwd,
+                ...(resolvedModel && { model: resolvedModel }),
+                permissionMode: input.mode === "plan" ? ("plan" as const) : ("bypassPermissions" as const),
+                ...(input.mode !== "plan" && { allowDangerouslySkipPermissions: true }),
+                env: agentEnv,
+                abortController,
+                // Session handling: resume with fork for existing sessions, continue for new
+                ...(resumeSessionId && {
+                  resume: resumeSessionId,
+                  fork: true,
+                }),
+                ...(!resumeSessionId && { continue: true }),
               }
 
-              // Debug logging AFTER declarations
-              console.log(`[${agentType}] CLI args:`, cliArgs.join(" "))
-              console.log(`[${agentType}] Spawn cwd:`, spawnCwd)
-              console.log(`[${agentType}] Spawn env CLAUDE_CODE_CWD:`, spawnEnv.CLAUDE_CODE_CWD)
-
-              const childProcess = spawn("node", cliArgs, {
-                env: spawnEnv,
-                cwd: spawnCwd,
-                stdio: ["pipe", "pipe", "pipe"],
-              })
-
-              // Close stdin immediately - prompt passed via CLI argument
-              childProcess.stdin?.end()
-
-              // Handle OpenClaude stdout (JSON stream)
+              // Create transformer for OpenClaude messages (same format as CLI stream-json)
               const openClaudeTransform = createTransformer({
-                emitSdkMessageUuid: historyEnabled,
                 isUsingOllama: endpointType === "openai-compatible",
               })
 
@@ -1266,94 +1234,142 @@ export const claudeRouter = router({
               let openClaudeParts: any[] = []
               let openClaudeCurrentText = ""
               let openClaudeMetadata: any = {}
+              let chunkCount = 0
+              let lastChunkType = ""
 
-              // Pipe stdout to transformer
-              childProcess.stdout?.on("data", (data: Buffer) => {
-                const lines = data.toString().split("\n")
-                for (const line of lines) {
-                  if (!line.trim()) continue
-                  try {
-                    const chunk = JSON.parse(line)
-                    const transformed = openClaudeTransform(chunk)
-                    for (const t of transformed) {
-                      // Inject model info from config BEFORE emitting (fixes UI display during streaming)
-                      if (t.type === "message-metadata" && finalCustomConfig) {
-                        t.messageMetadata = {
-                          ...t.messageMetadata,
-                          modelId: finalCustomConfig.model,
-                          modelProvider: endpointType === "openai-compatible" ? "openai" : "custom",
-                        }
-                      }
-                      safeEmit(t)
+              // Debug logging
+              console.log(`[${agentType}] SDK options:`, JSON.stringify({
+                cwd: sdkOptions.cwd,
+                model: sdkOptions.model,
+                permissionMode: sdkOptions.permissionMode,
+                resume: sdkOptions.resume,
+                fork: sdkOptions.fork,
+                continue: sdkOptions.continue,
+              }))
 
-                      // Accumulate parts for DB save (mirrors SDK branch)
-                      switch (t.type) {
-                        case "text-delta":
-                          openClaudeCurrentText += t.delta
-                          break
-                        case "text-end":
-                          if (openClaudeCurrentText.trim()) {
-                            openClaudeParts.push({ type: "text", text: openClaudeCurrentText })
-                            openClaudeCurrentText = ""
-                          }
-                          break
-                        case "tool-input-available":
-                          openClaudeParts.push({
-                            type: `tool-${t.toolName}`,
-                            toolCallId: t.toolCallId,
-                            toolName: t.toolName,
-                            input: t.input,
-                            state: "call",
-                            startedAt: Date.now(),
-                          })
-                          break
-                        case "tool-output-available":
-                          const toolPart = openClaudeParts.find(
-                            (p: any) => p.toolCallId === t.toolCallId && p.state === "call"
-                          )
-                          if (toolPart) {
-                            toolPart.state = "result"
-                            toolPart.output = t.output
-                            toolPart.completedAt = Date.now()
-                          }
-                          break
-                        case "tool-output-error":
-                          const errorPart = openClaudeParts.find(
-                            (p: any) => p.toolCallId === t.toolCallId && p.state === "call"
-                          )
-                          if (errorPart) {
-                            errorPart.state = "error"
-                            errorPart.error = t.errorText
-                            errorPart.completedAt = Date.now()
-                          }
-                          break
-                        case "message-metadata":
-                          openClaudeMetadata = t.messageMetadata
-                          break
+              // Run the query and iterate through messages
+              let stream: AsyncIterable<any>
+              try {
+                stream = openClaudeQuery({
+                  prompt: input.prompt,
+                  options: sdkOptions,
+                })
+              } catch (queryError) {
+                console.error(`[${agentType}] Failed to create query:`, queryError)
+                emitError(queryError, "Query failed")
+                safeEmit({ type: "finish" } as UIMessageChunk)
+                safeComplete()
+                return
+              }
+
+              try {
+                for await (const msg of stream) {
+                  // Reset inactivity timer on each message
+                  resetInactivityTimer()
+
+                  if (abortController.signal.aborted) {
+                    break
+                  }
+
+                  // Log raw message for debugging
+                  logRawClaudeMessage(input.chatId, msg)
+
+                  // Check for error messages from SDK
+                  const msgAny = msg as any
+                  if (msgAny.type === "error" || msgAny.error) {
+                    const messageText = msgAny.message?.content?.[0]?.text
+                    const sdkError = messageText || msgAny.error || msgAny.message || "Unknown SDK error"
+                    console.error(`[${agentType}] SDK error:`, sdkError)
+                    emitError(new Error(sdkError), "SDK error")
+                    break
+                  }
+
+                  // Track sessionId from messages
+                  if (msgAny.session_id) {
+                    openClaudeMetadata.sessionId = msgAny.session_id
+                  }
+
+                  // Transform and emit + accumulate
+                  for (const chunk of openClaudeTransform(msg)) {
+                    chunkCount++
+                    lastChunkType = chunk.type
+
+                    // Inject model info from config BEFORE emitting (fixes UI display during streaming)
+                    if (chunk.type === "message-metadata" && finalCustomConfig) {
+                      chunk.messageMetadata = {
+                        ...chunk.messageMetadata,
+                        modelId: finalCustomConfig.model,
+                        modelProvider: endpointType === "openai-compatible" ? "openai" : "custom",
                       }
                     }
-                  } catch (parseError) {
-                    console.error(`[${agentType}] JSON parse error:`, parseError)
+
+                    // Use safeEmit to prevent throws when observer is closed
+                    if (!safeEmit(chunk)) {
+                      // Observer closed (user clicked Stop), break out of loop
+                      console.log(`[${agentType}] Observer closed at chunk ${chunkCount}`)
+                      break
+                    }
+
+                    // Accumulate parts for DB save
+                    switch (chunk.type) {
+                      case "text-delta":
+                        openClaudeCurrentText += chunk.delta
+                        break
+                      case "text-end":
+                        if (openClaudeCurrentText.trim()) {
+                          openClaudeParts.push({ type: "text", text: openClaudeCurrentText })
+                          openClaudeCurrentText = ""
+                        }
+                        break
+                      case "tool-input-available":
+                        openClaudeParts.push({
+                          type: `tool-${chunk.toolName}`,
+                          toolCallId: chunk.toolCallId,
+                          toolName: chunk.toolName,
+                          input: chunk.input,
+                          state: "call",
+                          startedAt: Date.now(),
+                        })
+                        break
+                      case "tool-output-available":
+                        const toolPart = openClaudeParts.find(
+                          (p: any) => p.toolCallId === chunk.toolCallId && p.state === "call"
+                        )
+                        if (toolPart) {
+                          toolPart.state = "result"
+                          toolPart.output = chunk.output
+                          toolPart.completedAt = Date.now()
+                        }
+                        break
+                      case "tool-output-error":
+                        const errorPart = openClaudeParts.find(
+                          (p: any) => p.toolCallId === chunk.toolCallId && p.state === "call"
+                        )
+                        if (errorPart) {
+                          errorPart.state = "error"
+                          errorPart.error = chunk.errorText
+                          errorPart.completedAt = Date.now()
+                        }
+                        break
+                      case "message-metadata":
+                        openClaudeMetadata = { ...openClaudeMetadata, ...chunk.messageMetadata }
+                        break
+                    }
+                  }
+
+                  // Break from stream loop if observer closed
+                  if (!isObservableActive) {
+                    console.log(`[${agentType}] Observer closed, stopping stream`)
+                    break
                   }
                 }
-                resetInactivityTimer()
-              })
 
-              // Handle stderr - capture full output for debugging
-              let stderrOutput = ""
-              childProcess.stderr?.on("data", (data: Buffer) => {
-                stderrOutput += data.toString()
-                console.error(`[${agentType}] stderr chunk:`, data.toString())
-              })
-
-              // Handle process exit - save messages to DB
-              childProcess.on("exit", async (code, signal) => {
-                console.log(`[${agentType}] Process exit code=${code} parts=${openClaudeParts.length}`)
+                // Stream completed - save messages to DB
+                console.log(`[${agentType}] Stream completed: ${chunkCount} chunks, ${openClaudeParts.length} parts`)
 
                 // Flush remaining text
                 if (openClaudeCurrentText.trim()) {
                   openClaudeParts.push({ type: "text", text: openClaudeCurrentText })
-                  openClaudeCurrentText = ""
                 }
 
                 // Inject model info from customConfig if available
@@ -1362,7 +1378,7 @@ export const claudeRouter = router({
                   openClaudeMetadata.modelProvider = endpointType === "openai-compatible" ? "openai" : "custom"
                 }
 
-                // Save messages to DB (same logic as SDK branch)
+                // Save messages to DB
                 if (openClaudeParts.length > 0) {
                   try {
                     const db = getDatabase()
@@ -1433,32 +1449,50 @@ export const claudeRouter = router({
                   }
                 }
 
-                // Emit error if process failed
-                if (code !== 0 && code !== null) {
-                  console.error(`[${agentType}] FULL stderr output:`, stderrOutput)
-                  emitError(new Error(`Process exited with code ${code}: ${stderrOutput.slice(0, 500)}`), "Process crash")
+              } catch (streamError) {
+                // Handle stream errors
+                const err = streamError as Error
+                console.error(`[${agentType}] Stream error:`, err.message)
+
+                // Flush remaining text and save even on error
+                if (openClaudeCurrentText.trim()) {
+                  openClaudeParts.push({ type: "text", text: openClaudeCurrentText })
                 }
 
+                if (openClaudeParts.length > 0) {
+                  try {
+                    const db = getDatabase()
+                    const assistantMessage = {
+                      id: crypto.randomUUID(),
+                      role: "assistant",
+                      parts: openClaudeParts,
+                      metadata: openClaudeMetadata,
+                    }
+                    const finalMessages = [...messagesToSave, assistantMessage]
+
+                    db.update(subChats)
+                      .set({
+                        messages: JSON.stringify(finalMessages),
+                        sessionId: openClaudeMetadata.sessionId,
+                        streamId: null,
+                        updatedAt: new Date(),
+                      })
+                      .where(eq(subChats.id, input.subChatId))
+                      .run()
+                  } catch (saveError) {
+                    console.error(`[${agentType}] Failed to save on error:`, saveError)
+                  }
+                }
+
+                if (!abortController.signal.aborted) {
+                  emitError(err, "Stream error")
+                }
+              } finally {
                 safeEmit({ type: "finish" } as UIMessageChunk)
                 safeComplete()
                 clearInactivityTimer()
                 activeSessions.delete(input.subChatId)
-              })
-
-              // Handle process error
-              childProcess.on("error", (err) => {
-                emitError(err, "Spawn error")
-                safeEmit({ type: "finish" } as UIMessageChunk)
-                safeComplete()
-                activeSessions.delete(input.subChatId)
-              })
-
-              // Store abort handler
-              abortController.signal.addEventListener("abort", () => {
-                if (childProcess) {
-                  childProcess.kill()
-                }
-              })
+              }
 
               return // Exit the procedure - OpenClaude handling complete
             }
