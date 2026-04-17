@@ -355,11 +355,28 @@ export function buildAgentEnv(options: {
     }
 
     // For true Anthropic API, use Anthropic env vars
+    // BUT: if model is not a standard Anthropic model (claude-*), set CUSTOM_MODEL_OPTION
+    // to bypass model validation for custom/proxy models
+    const modelId = options.profile.models[0]?.modelId || ""
+    const isAnthropicModel = modelId.toLowerCase().startsWith("claude-")
+
+    if (isAnthropicModel) {
+      return {
+        ...baseEnv,
+        ANTHROPIC_AUTH_TOKEN: options.profile.token,
+        ANTHROPIC_BASE_URL: options.profile.baseUrl,
+        ANTHROPIC_DEFAULT_MODEL: modelId,
+      }
+    }
+
+    // Anthropic URL with non-Anthropic model (proxy scenario)
+    // Use OpenAI mode to skip model validation
     return {
       ...baseEnv,
-      ANTHROPIC_AUTH_TOKEN: options.profile.token,
-      ANTHROPIC_BASE_URL: options.profile.baseUrl,
-      ANTHROPIC_DEFAULT_MODEL: options.profile.models[0]?.modelId || "",
+      CLAUDE_CODE_USE_OPENAI: "true",
+      OPENAI_BASE_URL: options.profile.baseUrl,
+      OPENAI_API_KEY: options.profile.token,
+      OPENAI_MODEL: modelId,
     }
   }
 
