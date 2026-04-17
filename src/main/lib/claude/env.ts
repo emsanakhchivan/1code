@@ -435,6 +435,13 @@ export function clearOpenClaudeEnvCache(): void {
 }
 
 /**
+ * Clear cached OpenClaude SDK query function (for testing)
+ */
+export function clearOpenClaudeSDKCache(): void {
+  cachedOpenClaudeQuery = null
+}
+
+/**
  * Debug: Log key environment variables
  */
 export function logClaudeEnv(

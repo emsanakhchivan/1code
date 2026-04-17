@@ -15,6 +15,7 @@ export {
   getOpenClaudeSDK,
   buildAgentEnv,
   clearOpenClaudeEnvCache,
+  clearOpenClaudeSDKCache,
 } from "./env"
 export { checkOfflineFallback } from "./offline-handler"
 export type { OfflineCheckResult, CustomClaudeConfig } from "./offline-handler"
