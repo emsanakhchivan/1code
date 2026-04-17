@@ -335,42 +335,27 @@ export function buildAgentEnv(options: {
     enableTasks: options.enableTasks,
   })
 
-  // OpenClaude with custom profile
+  // OpenClaude with custom profile - use endpointType to decide API format
   if (options.agentType === "openclaude" && options.profile) {
-    // Check if baseUrl is default Anthropic URL
-    const isAnthropicUrl = !options.profile.baseUrl ||
-      options.profile.baseUrl.includes("api.anthropic.com")
-
-    // For custom baseUrl (not Anthropic), always use OpenAI mode
-    // This skips model validation which Anthropic mode does
-    // Custom endpoints with custom models need this regardless of endpointType
-    if (!isAnthropicUrl) {
-      return {
-        ...baseEnv,
-        CLAUDE_CODE_USE_OPENAI: "true",
-        OPENAI_BASE_URL: options.profile.baseUrl,
-        OPENAI_API_KEY: options.profile.token,
-        OPENAI_MODEL: options.profile.models[0]?.modelId || "",
-      }
-    }
-
-    // For true Anthropic API, use Anthropic env vars
-    // BUT: if model is not a standard Anthropic model (claude-*), set CUSTOM_MODEL_OPTION
-    // to bypass model validation for custom/proxy models
     const modelId = options.profile.models[0]?.modelId || ""
-    const isAnthropicModel = modelId.toLowerCase().startsWith("claude-")
 
-    if (isAnthropicModel) {
+    // endpointType determines API format, NOT baseUrl
+    // "anthropic" = Anthropic API format (works with any Anthropic-compatible URL)
+    // "openai-compatible" = OpenAI API format
+    if (options.endpointType === "anthropic") {
       return {
         ...baseEnv,
         ANTHROPIC_AUTH_TOKEN: options.profile.token,
         ANTHROPIC_BASE_URL: options.profile.baseUrl,
         ANTHROPIC_DEFAULT_MODEL: modelId,
+        // For non-claude models, set CUSTOM_MODEL_OPTION to bypass validation
+        ...(modelId && !modelId.toLowerCase().startsWith("claude-") && {
+          ANTHROPIC_CUSTOM_MODEL_OPTION: modelId,
+        }),
       }
     }
 
-    // Anthropic URL with non-Anthropic model (proxy scenario)
-    // Use OpenAI mode to skip model validation
+    // openai-compatible endpoint - use OpenAI env vars
     return {
       ...baseEnv,
       CLAUDE_CODE_USE_OPENAI: "true",
