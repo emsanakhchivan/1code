@@ -12,6 +12,7 @@ export {
   logClaudeEnv,
   getBundledClaudeBinaryPath,
   getBundledOpenClaudeBinaryPath,
+  getOpenClaudeSDK,
   buildAgentEnv,
   clearOpenClaudeEnvCache,
 } from "./env"

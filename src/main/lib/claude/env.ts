@@ -160,6 +160,37 @@ export function getBundledOpenClaudeBinaryPath(): string {
   return binaryPath
 }
 
+// Cache for OpenClaude SDK query function
+let cachedOpenClaudeQuery: ((params: { prompt: string | AsyncIterable<any>; options?: any }) => AsyncIterable<any>) | null = null
+
+/**
+ * Get the OpenClaude SDK query function.
+ * Dynamic import from hardcoded path in dev mode, bundled copy in production.
+ */
+export async function getOpenClaudeSDK(): Promise<(params: { prompt: string | AsyncIterable<any>; options?: any }) => AsyncIterable<any>> {
+  if (cachedOpenClaudeQuery) return cachedOpenClaudeQuery
+
+  const isDev = !app.isPackaged
+  const sdkPath = isDev
+    ? "C:/Users/test/Documents/Projects/oclaude/dist/sdk.mjs"
+    : path.join(process.resourcesPath, "bin", "openclaude-sdk.mjs")
+
+  console.log("[openclaude-sdk] Loading SDK from:", sdkPath)
+
+  try {
+    const sdk = await import(sdkPath)
+    const queryFn = sdk.query as (params: { prompt: string | AsyncIterable<any>; options?: any }) => AsyncIterable<any>
+    if (!queryFn) {
+      throw new Error("SDK module does not export 'query' function")
+    }
+    cachedOpenClaudeQuery = queryFn
+    return queryFn
+  } catch (err) {
+    console.error("[openclaude-sdk] Failed to load SDK:", err)
+    throw new Error(`Failed to load OpenClaude SDK from ${sdkPath}: ${err}`)
+  }
+}
+
 /**
  * Parse environment variables from shell output
  */
