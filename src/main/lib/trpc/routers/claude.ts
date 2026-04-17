@@ -1214,11 +1214,11 @@ export const claudeRouter = router({
                 ...(resolvedModel && { model: resolvedModel }),
                 permissionMode: input.mode === "plan" ? ("plan" as const) : ("bypassPermissions" as const),
                 ...(input.mode !== "plan" && { allowDangerouslySkipPermissions: true }),
-                env: agentEnv,
+                settings: { env: agentEnv },
                 abortController,
                 // Session handling: resume with fork for existing sessions, continue for new
                 ...(resumeSessionId && {
-                  resume: resumeSessionId,
+                  sessionId: resumeSessionId,
                   fork: true,
                 }),
                 ...(!resumeSessionId && { continue: true }),
@@ -1241,7 +1241,7 @@ export const claudeRouter = router({
                 cwd: sdkOptions.cwd,
                 model: sdkOptions.model,
                 permissionMode: sdkOptions.permissionMode,
-                resume: sdkOptions.resume,
+                sessionId: sdkOptions.sessionId,
                 fork: sdkOptions.fork,
                 continue: sdkOptions.continue,
               }))
