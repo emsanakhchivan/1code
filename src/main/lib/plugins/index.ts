@@ -2,9 +2,12 @@ import * as fs from "fs/promises"
 import type { Dirent } from "fs"
 import * as path from "path"
 import * as os from "os"
-import * as cp from "child_process"
+import { execFile } from "child_process"
+import { promisify } from "util"
 import type { McpServerConfig } from "../claude-config"
 import { isDirentDirectory } from "../fs/dirent"
+
+const execFileAsync = promisify(execFile)
 
 export interface PluginInfo {
   name: string
@@ -16,6 +19,8 @@ export interface PluginInfo {
   category?: string
   homepage?: string
   tags?: string[]
+  /** Whether this plugin needs to be fetched (git clone) before use */
+  needsFetch?: boolean
 }
 
 interface MarketplacePlugin {
@@ -51,7 +56,10 @@ export interface PluginMcpConfig {
 // Cache for plugin discovery results
 let pluginCache: { plugins: PluginInfo[]; timestamp: number } | null = null
 let mcpCache: { configs: PluginMcpConfig[]; timestamp: number } | null = null
-const CACHE_TTL_MS = 30000 // 30 seconds - plugins don't change often during a session
+const CACHE_TTL_MS = 30000 // 30 seconds
+
+// Track which repos have been cloned to avoid re-cloning
+const clonedRepos = new Map<string, string>() // url -> local path
 
 /**
  * Clear plugin caches (for testing/manual invalidation)
@@ -63,127 +71,149 @@ export function clearPluginCache() {
 
 /**
  * Get the cache directory for cloned external plugins.
- * Located at ~/.claude/plugins/.cache/
  */
 function getPluginCacheDir(): string {
   return path.join(os.homedir(), ".claude", "plugins", ".cache")
 }
 
 /**
- * Ensure a git repo is cloned (or updated) at the cache location.
+ * Compute the expected clone directory for a repo URL (without actually cloning).
+ */
+function getCloneDir(repoUrl: string): string {
+  const cacheDir = getPluginCacheDir()
+  const urlHash = Buffer.from(repoUrl).toString("base64url").replace(/[/+=]/g, "_").substring(0, 48)
+  return path.join(cacheDir, urlHash)
+}
+
+/**
+ * Check if a cached clone exists and optionally verify its SHA.
+ */
+async function getCachedClone(cloneDir: string, expectedSha?: string): Promise<string | null> {
+  try {
+    await fs.access(path.join(cloneDir, ".git"))
+    if (expectedSha) {
+      try {
+        const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: cloneDir })
+        if (stdout.trim() === expectedSha) return cloneDir
+      } catch {
+        // Can't read SHA, use what we have
+      }
+    }
+    return cloneDir
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Clone a git repo to the cache directory (async, non-blocking).
  * Returns the local path to the cloned repo.
  */
-async function ensureCloned(repoUrl: string, sha?: string): Promise<string> {
-  const cacheDir = getPluginCacheDir()
+async function cloneRepo(repoUrl: string, sha?: string): Promise<string> {
+  const cloneDir = getCloneDir(repoUrl)
 
-  // Create a stable directory name from the URL
-  const urlHash = Buffer.from(repoUrl).toString("base64url").replace(/[/+=]/g, "_").substring(0, 48)
-  const cloneDir = path.join(cacheDir, urlHash)
+  // Check if already cloned and up to date
+  const cached = await getCachedClone(cloneDir, sha)
+  if (cached) return cached
+
+  // Check memory cache to avoid duplicate concurrent clones
+  if (clonedRepos.has(repoUrl)) return clonedRepos.get(repoUrl)!
+
+  // Clone the repo asynchronously
+  const cacheDir = getPluginCacheDir()
+  await fs.mkdir(cacheDir, { recursive: true })
 
   try {
-    await fs.access(cloneDir)
-    // Directory exists — if we need a specific SHA and it matches, we're done
-    if (sha) {
-      try {
-        const currentSha = cp.execSync("git rev-parse HEAD", {
-          cwd: cloneDir,
-          encoding: "utf-8",
-        }).trim()
-        if (currentSha === sha) return cloneDir
-      } catch {
-        // Can't check current SHA, fall through to re-clone
-      }
-    }
-
-    // Try to fetch and checkout
-    try {
-      if (sha) {
-        cp.execSync("git fetch origin", { cwd: cloneDir, stdio: "pipe" })
-        cp.execSync(`git checkout ${sha}`, { cwd: cloneDir, stdio: "pipe" })
-        return cloneDir
-      }
-      // No specific SHA — just pull
-      cp.execSync("git pull --ff-only", { cwd: cloneDir, stdio: "pipe" })
-      return cloneDir
-    } catch {
-      // Pull failed, remove and re-clone below
-    }
+    await execFileAsync("git", ["clone", "--depth", "50", repoUrl, cloneDir], {
+      cwd: cacheDir,
+    })
   } catch {
-    // Directory doesn't exist, proceed to clone
+    // Clone failed — try without depth
+    try {
+      await fs.rm(cloneDir, { recursive: true, force: true })
+    } catch { /* ignore */ }
+    await execFileAsync("git", ["clone", repoUrl, cloneDir], {
+      cwd: cacheDir,
+    })
   }
-
-  // Clone the repo
-  await fs.mkdir(cacheDir, { recursive: true })
-  cp.execSync(`git clone --depth 50 ${sha ? "" : "--single-branch "}"${repoUrl}" "${cloneDir}"`, {
-    stdio: "pipe",
-    cwd: cacheDir,
-  })
 
   if (sha) {
     try {
-      cp.execSync(`git fetch origin ${sha}`, { cwd: cloneDir, stdio: "pipe" })
-      cp.execSync(`git checkout ${sha}`, { cwd: cloneDir, stdio: "pipe" })
+      await execFileAsync("git", ["fetch", "origin", sha], { cwd: cloneDir })
+      await execFileAsync("git", ["checkout", sha], { cwd: cloneDir })
     } catch {
-      // If SHA fetch fails, try full fetch
       try {
-        cp.execSync("git fetch --unshallow", { cwd: cloneDir, stdio: "pipe" })
-        cp.execSync(`git checkout ${sha}`, { cwd: cloneDir, stdio: "pipe" })
+        await execFileAsync("git", ["fetch", "--unshallow"], { cwd: cloneDir })
+        await execFileAsync("git", ["checkout", sha], { cwd: cloneDir })
       } catch {
-        // Best effort — continue with whatever we have
+        // Best effort
       }
     }
   }
 
+  clonedRepos.set(repoUrl, cloneDir)
   return cloneDir
 }
 
 /**
- * Resolve an object source to a local plugin path.
- * Handles "url", "github", and "git-subdir" source types.
+ * Resolve an object source to a local plugin path (async, non-blocking).
+ * Returns null if the plugin hasn't been fetched yet and autoFetch is false.
  */
 async function resolveObjectSource(
-  marketplacePath: string,
-  pluginName: string,
-  sourceInfo: PluginSourceInfo
+  sourceInfo: PluginSourceInfo,
+  autoFetch: boolean
 ): Promise<string | null> {
   const sourceType = sourceInfo.source
 
   if (sourceType === "url") {
-    // Clone the full repo as the plugin
     if (!sourceInfo.url) return null
+    const cloneDir = getCloneDir(sourceInfo.url)
+    // Fast check: is it already cached?
+    const cached = await getCachedClone(cloneDir, sourceInfo.sha)
+    if (cached) return cached
+    // Not cached — return null unless autoFetch
+    if (!autoFetch) return null
     try {
-      const clonePath = await ensureCloned(sourceInfo.url, sourceInfo.sha)
-      return clonePath
+      return await cloneRepo(sourceInfo.url, sourceInfo.sha)
     } catch {
       return null
     }
   }
 
   if (sourceType === "github") {
-    // Clone from a GitHub repo
     const repo = sourceInfo.repo
     if (!repo) return null
     const repoUrl = `https://github.com/${repo}.git`
+    const cloneDir = getCloneDir(repoUrl)
+    const cached = await getCachedClone(cloneDir, sourceInfo.sha || sourceInfo.commit)
+    if (cached) return cached
+    if (!autoFetch) return null
     try {
-      const clonePath = await ensureCloned(repoUrl, sourceInfo.sha || sourceInfo.commit)
-      return clonePath
+      return await cloneRepo(repoUrl, sourceInfo.sha || sourceInfo.commit)
     } catch {
       return null
     }
   }
 
   if (sourceType === "git-subdir") {
-    // Clone the parent repo and point to a subdirectory
     if (!sourceInfo.url || !sourceInfo.path) return null
-    try {
-      const clonePath = await ensureCloned(sourceInfo.url, sourceInfo.sha)
-      const subDir = path.join(clonePath, sourceInfo.path)
+    const cloneDir = getCloneDir(sourceInfo.url)
+    const cached = await getCachedClone(cloneDir, sourceInfo.sha)
+    if (cached) {
+      const subDir = path.join(cached, sourceInfo.path)
       try {
         const stat = await fs.stat(subDir)
         if (stat.isDirectory()) return subDir
-      } catch {
-        // Subdirectory doesn't exist in the clone
-      }
+      } catch { /* not found */ }
+    }
+    if (!autoFetch) return null
+    try {
+      const repoPath = await cloneRepo(sourceInfo.url, sourceInfo.sha)
+      const subDir = path.join(repoPath, sourceInfo.path)
+      try {
+        const stat = await fs.stat(subDir)
+        if (stat.isDirectory()) return subDir
+      } catch { /* not found */ }
       return null
     } catch {
       return null
@@ -194,18 +224,12 @@ async function resolveObjectSource(
 }
 
 /**
- * Discover all installed plugins from ~/.claude/plugins/marketplaces/
- * Returns array of plugin info with paths to their component directories.
- * Results are cached for 30 seconds to avoid repeated filesystem scans.
- *
- * Supports three source formats:
- * - String: relative path within marketplace directory
- * - { source: "url", url, sha }: full git repo URL
- * - { source: "github", repo, sha }: GitHub repo
- * - { source: "git-subdir", url, path, sha }: git repo with plugin in subdirectory
+ * Discover all plugins from ~/.claude/plugins/marketplaces/
+ * This is FAST — it reads marketplace.json and lists all plugins.
+ * Object source plugins that aren't cached locally get needsFetch=true.
+ * Use fetchPlugin() to download individual plugins on demand.
  */
 export async function discoverInstalledPlugins(): Promise<PluginInfo[]> {
-  // Return cached result if still valid
   if (pluginCache && Date.now() - pluginCache.timestamp < CACHE_TTL_MS) {
     return pluginCache.plugins
   }
@@ -231,10 +255,7 @@ export async function discoverInstalledPlugins(): Promise<PluginInfo[]> {
   for (const marketplace of marketplaces) {
     if (marketplace.name.startsWith(".")) continue
 
-    const isMarketplaceDir = await isDirentDirectory(
-      marketplacesDir,
-      marketplace,
-    )
+    const isMarketplaceDir = await isDirentDirectory(marketplacesDir, marketplace)
     if (!isMarketplaceDir) continue
 
     const marketplacePath = path.join(marketplacesDir, marketplace.name)
@@ -242,42 +263,38 @@ export async function discoverInstalledPlugins(): Promise<PluginInfo[]> {
 
     try {
       const content = await fs.readFile(marketplaceJsonPath, "utf-8")
-
       let marketplaceJson: MarketplaceJson
       try {
         marketplaceJson = JSON.parse(content)
       } catch {
         continue
       }
-
-      if (!Array.isArray(marketplaceJson.plugins)) {
-        continue
-      }
+      if (!Array.isArray(marketplaceJson.plugins)) continue
 
       for (const plugin of marketplaceJson.plugins) {
-        // Validate plugin.source exists
         if (!plugin.source) continue
 
         let pluginPath: string | null = null
+        let needsFetch = false
 
         if (typeof plugin.source === "string") {
-          // String source: relative path within marketplace directory
           pluginPath = path.resolve(marketplacePath, plugin.source)
           try {
             const pluginStat = await fs.stat(pluginPath)
             if (!pluginStat.isDirectory()) continue
           } catch {
-            // Directory not found, skip
             continue
           }
         } else if (typeof plugin.source === "object") {
-          // Object source: url, github, or git-subdir
-          pluginPath = await resolveObjectSource(
-            marketplacePath,
-            plugin.name,
-            plugin.source as PluginSourceInfo,
-          )
-          if (!pluginPath) continue
+          // Check if already cached locally — DO NOT clone here
+          const resolved = await resolveObjectSource(plugin.source as PluginSourceInfo, false)
+          if (resolved) {
+            pluginPath = resolved
+          } else {
+            // Not cached — list it but mark as needing fetch
+            needsFetch = true
+            pluginPath = "" // no local path yet
+          }
         } else {
           continue
         }
@@ -292,15 +309,75 @@ export async function discoverInstalledPlugins(): Promise<PluginInfo[]> {
           category: plugin.category,
           homepage: plugin.homepage,
           tags: plugin.tags,
+          needsFetch,
         })
       }
     } catch {
-      // No marketplace.json, skip silently (expected for non-plugin directories)
+      // No marketplace.json
     }
   }
 
   pluginCache = { plugins, timestamp: Date.now() }
   return plugins
+}
+
+/**
+ * Fetch (clone) a single plugin that has needsFetch=true.
+ * Returns updated PluginInfo with the local path.
+ * This is async and non-blocking.
+ */
+export async function fetchPlugin(pluginSource: string): Promise<PluginInfo | null> {
+  // Find the plugin in marketplace data
+  const marketplacesDir = path.join(os.homedir(), ".claude", "plugins", "marketplaces")
+
+  let targetPlugin: { plugin: MarketplacePlugin; marketplaceName: string } | null = null
+
+  try {
+    const marketplaces = await fs.readdir(marketplacesDir, { withFileTypes: true })
+    for (const marketplace of marketplaces) {
+      if (marketplace.name.startsWith(".")) continue
+      const marketplacePath = path.join(marketplacesDir, marketplace.name)
+      const marketplaceJsonPath = path.join(marketplacePath, ".claude-plugin", "marketplace.json")
+
+      try {
+        const content = await fs.readFile(marketplaceJsonPath, "utf-8")
+        const marketplaceJson: MarketplaceJson = JSON.parse(content)
+        if (!Array.isArray(marketplaceJson.plugins)) continue
+
+        for (const plugin of marketplaceJson.plugins) {
+          const source = `${marketplaceJson.name}:${plugin.name}`
+          if (source === pluginSource && typeof plugin.source === "object") {
+            targetPlugin = { plugin, marketplaceName: marketplaceJson.name }
+            break
+          }
+        }
+      } catch { /* skip */ }
+      if (targetPlugin) break
+    }
+  } catch {
+    return null
+  }
+
+  if (!targetPlugin) return null
+
+  const pluginPath = await resolveObjectSource(targetPlugin.plugin.source as PluginSourceInfo, true)
+  if (!pluginPath) return null
+
+  // Invalidate cache so next discovery picks up the new path
+  clearPluginCache()
+
+  return {
+    name: targetPlugin.plugin.name,
+    version: targetPlugin.plugin.version || "0.0.0",
+    description: targetPlugin.plugin.description,
+    path: pluginPath,
+    source: `${targetPlugin.marketplaceName}:${targetPlugin.plugin.name}`,
+    marketplace: targetPlugin.marketplaceName,
+    category: targetPlugin.plugin.category,
+    homepage: targetPlugin.plugin.homepage,
+    tags: targetPlugin.plugin.tags,
+    needsFetch: false,
+  }
 }
 
 /**
@@ -316,11 +393,9 @@ export function getPluginComponentPaths(plugin: PluginInfo) {
 
 /**
  * Discover MCP server configs from all installed plugins
- * Reads .mcp.json from each plugin directory
- * Results are cached for 30 seconds to avoid repeated filesystem scans
+ * Only reads from plugins that have a local path (already fetched).
  */
 export async function discoverPluginMcpServers(): Promise<PluginMcpConfig[]> {
-  // Return cached result if still valid
   if (mcpCache && Date.now() - mcpCache.timestamp < CACHE_TTL_MS) {
     return mcpCache.configs
   }
@@ -329,6 +404,8 @@ export async function discoverPluginMcpServers(): Promise<PluginMcpConfig[]> {
   const configs: PluginMcpConfig[] = []
 
   for (const plugin of plugins) {
+    if (plugin.needsFetch || !plugin.path) continue
+
     const mcpJsonPath = path.join(plugin.path, ".mcp.json")
     try {
       const content = await fs.readFile(mcpJsonPath, "utf-8")
@@ -339,9 +416,6 @@ export async function discoverPluginMcpServers(): Promise<PluginMcpConfig[]> {
         continue
       }
 
-      // Support two formats:
-      // Format A (flat): { "server-name": { "command": "...", ... } }
-      // Format B (nested): { "mcpServers": { "server-name": { ... } } }
       const serversObj =
         parsed.mcpServers &&
         typeof parsed.mcpServers === "object" &&
@@ -363,11 +437,10 @@ export async function discoverPluginMcpServers(): Promise<PluginMcpConfig[]> {
         })
       }
     } catch {
-      // No .mcp.json file, skip silently (this is expected for most plugins)
+      // No .mcp.json
     }
   }
 
-  // Cache the result
   mcpCache = { configs, timestamp: Date.now() }
   return configs
 }

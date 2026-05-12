@@ -1,4 +1,5 @@
 import { router, publicProcedure } from "../index"
+import { z } from "zod"
 import * as fs from "fs/promises"
 import * as path from "path"
 import matter from "gray-matter"
@@ -8,6 +9,7 @@ import {
   getPluginComponentPaths,
   discoverPluginMcpServers,
   clearPluginCache,
+  fetchPlugin,
 } from "../../plugins"
 import { getEnabledPlugins } from "./claude-settings"
 
@@ -46,6 +48,7 @@ interface PluginWithComponents {
   homepage?: string
   tags?: string[]
   isDisabled: boolean
+  needsFetch?: boolean
   components: {
     commands: PluginComponent[]
     skills: PluginComponent[]
@@ -212,8 +215,34 @@ export const pluginsRouter = router({
     const normalizedEnabled = enabledPlugins.map(normalizeSource)
 
     // Scan components for each plugin in parallel
+    // Skip component scanning for plugins that need fetching (no local path)
     const pluginsWithComponents = await Promise.all(
       installedPlugins.map(async (plugin) => {
+        const isDisabled = !normalizedEnabled.includes(normalizeSource(plugin.source))
+
+        // If plugin needs fetch, skip component scanning
+        if (plugin.needsFetch) {
+          return {
+            name: plugin.name,
+            version: plugin.version,
+            description: plugin.description,
+            path: plugin.path,
+            source: plugin.source,
+            marketplace: plugin.marketplace,
+            category: plugin.category,
+            homepage: plugin.homepage,
+            tags: plugin.tags,
+            isDisabled,
+            needsFetch: true as const,
+            components: {
+              commands: [],
+              skills: [],
+              agents: [],
+              mcpServers: [],
+            },
+          }
+        }
+
         const paths = getPluginComponentPaths(plugin)
 
         const [commands, skills, agents] = await Promise.all([
@@ -232,7 +261,8 @@ export const pluginsRouter = router({
           category: plugin.category,
           homepage: plugin.homepage,
           tags: plugin.tags,
-          isDisabled: !normalizedEnabled.includes(normalizeSource(plugin.source)),
+          isDisabled,
+          needsFetch: false as const,
           components: {
             commands,
             skills,
@@ -253,4 +283,18 @@ export const pluginsRouter = router({
     clearPluginCache()
     return { success: true }
   }),
+
+  /**
+   * Fetch (clone) a single plugin that has needsFetch=true.
+   * This is async and non-blocking. Returns the updated plugin info.
+   */
+  fetch: publicProcedure
+    .input(z.object({ pluginSource: z.string() }))
+    .mutation(async ({ input }) => {
+      const result = await fetchPlugin(input.pluginSource)
+      if (!result) {
+        throw new Error(`Failed to fetch plugin: ${input.pluginSource}`)
+      }
+      return result
+    }),
 })

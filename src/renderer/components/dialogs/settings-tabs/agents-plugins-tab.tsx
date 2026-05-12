@@ -5,7 +5,7 @@ import { settingsPluginsSidebarWidthAtom } from "../../../features/agents/atoms"
 import { agentsSettingsDialogActiveTabAtom, type SettingsTab } from "../../../lib/atoms"
 import { trpc } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
-import { Terminal, ChevronRight, Loader2 } from "lucide-react"
+import { Terminal, ChevronRight, Loader2, Download } from "lucide-react"
 import { PluginFilledIcon, SkillIconFilled, CustomAgentIconFilled, OriginalMCPIcon } from "../../ui/icons"
 import { Button } from "../../ui/button"
 import { Label } from "../../ui/label"
@@ -36,6 +36,7 @@ interface PluginData {
   homepage?: string
   tags?: string[]
   isDisabled: boolean
+  needsFetch?: boolean
   components: {
     commands: PluginComponent[]
     skills: PluginComponent[]
@@ -58,6 +59,8 @@ function PluginDetail({
   mcpServerStatuses,
   onMcpAuth,
   isAuthenticating,
+  onFetch,
+  isFetching,
 }: {
   plugin: PluginData
   onToggleEnabled: (enabled: boolean) => void
@@ -66,6 +69,8 @@ function PluginDetail({
   mcpServerStatuses: Record<string, McpServerStatus>
   onMcpAuth: (serverName: string) => void
   isAuthenticating: boolean
+  onFetch: () => void
+  isFetching: boolean
 }) {
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -76,23 +81,41 @@ function PluginDetail({
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-foreground">{formatPluginName(plugin.name)}</h3>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className={cn(
-                    "inline-block h-1.5 w-1.5 rounded-full",
-                    plugin.isDisabled ? "bg-muted-foreground/40" : "bg-emerald-500"
-                  )} />
-                  <span className={cn(
-                    "text-sm font-medium",
-                    plugin.isDisabled ? "text-muted-foreground" : "text-emerald-500"
-                  )}>
-                    {plugin.isDisabled ? "Disabled" : "Active"}
-                  </span>
-                </div>
-                <Switch
-                  checked={!plugin.isDisabled}
-                  onCheckedChange={onToggleEnabled}
-                  disabled={isTogglingEnabled}
-                />
+                {plugin.needsFetch ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="h-7 px-3 text-xs"
+                    disabled={isFetching}
+                    onClick={onFetch}
+                  >
+                    {isFetching ? (
+                      <><Loader2 className="h-3 w-3 animate-spin mr-1.5" /> Downloading...</>
+                    ) : (
+                      <><Download className="h-3 w-3 mr-1.5" /> Download</>
+                    )}
+                  </Button>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn(
+                        "inline-block h-1.5 w-1.5 rounded-full",
+                        plugin.isDisabled ? "bg-muted-foreground/40" : "bg-emerald-500"
+                      )} />
+                      <span className={cn(
+                        "text-sm font-medium",
+                        plugin.isDisabled ? "text-muted-foreground" : "text-emerald-500"
+                      )}>
+                        {plugin.isDisabled ? "Disabled" : "Active"}
+                      </span>
+                    </div>
+                    <Switch
+                      checked={!plugin.isDisabled}
+                      onCheckedChange={onToggleEnabled}
+                      disabled={isTogglingEnabled}
+                    />
+                  </>
+                )}
               </div>
             </div>
             {plugin.category && (
@@ -275,7 +298,12 @@ function PluginListItem({
           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
       )}
     >
-      <div className="text-sm leading-tight truncate">{formatPluginName(plugin.name)}</div>
+      <div className="text-sm leading-tight truncate flex items-center gap-1.5">
+        {formatPluginName(plugin.name)}
+        {plugin.needsFetch && (
+          <span className="text-[10px] px-1 py-0 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">remote</span>
+        )}
+      </div>
       {plugin.description && (
         <div className="text-[11px] text-muted-foreground/60 truncate mt-0.5">
           {plugin.description}
@@ -344,6 +372,20 @@ export function AgentsPluginsTab() {
   }, [startOAuthMutation, refetchMcp])
 
   const setPluginEnabledMutation = trpc.claudeSettings.setPluginEnabled.useMutation()
+
+  const fetchPluginMutation = trpc.plugins.fetch.useMutation()
+  const handleFetchPlugin = useCallback(async () => {
+    if (!selectedPlugin?.source) return
+    try {
+      const result = await fetchPluginMutation.mutateAsync({ pluginSource: selectedPlugin.source })
+      if (result) {
+        toast.success("Plugin downloaded", { description: formatPluginName(result.name) })
+        await refetch()
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to download plugin")
+    }
+  }, [fetchPluginMutation, selectedPlugin, refetch])
 
   const filteredPlugins = useMemo(() => {
     if (!searchQuery.trim()) return plugins
@@ -538,6 +580,8 @@ export function AgentsPluginsTab() {
             mcpServerStatuses={mcpServerStatuses}
             onMcpAuth={handleMcpAuth}
             isAuthenticating={startOAuthMutation.isPending}
+            onFetch={handleFetchPlugin}
+            isFetching={fetchPluginMutation.isPending}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-center px-4">
