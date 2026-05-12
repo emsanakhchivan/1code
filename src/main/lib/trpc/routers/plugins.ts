@@ -11,6 +11,25 @@ import {
 } from "../../plugins"
 import { getEnabledPlugins } from "./claude-settings"
 
+/**
+ * Normalize a plugin source identifier to a canonical form for comparison.
+ * Handles two formats:
+ * - "marketplace:plugin-name" (code-generated format)
+ * - "plugin-name@marketplace" (Claude Code CLI format)
+ */
+function normalizeSource(source: string): string {
+  // Already in marketplace:name format (contains :)
+  if (source.includes(":")) return source
+  // Claude CLI format: name@marketplace → marketplace:name
+  const atIdx = source.lastIndexOf("@")
+  if (atIdx > 0) {
+    const name = source.substring(0, atIdx)
+    const marketplace = source.substring(atIdx + 1)
+    return `${marketplace}:${name}`
+  }
+  return source
+}
+
 interface PluginComponent {
   name: string
   description?: string
@@ -189,6 +208,9 @@ export const pluginsRouter = router({
       pluginMcpMap.set(config.pluginSource, Object.keys(config.mcpServers))
     }
 
+    // Normalize enabled plugins for comparison
+    const normalizedEnabled = enabledPlugins.map(normalizeSource)
+
     // Scan components for each plugin in parallel
     const pluginsWithComponents = await Promise.all(
       installedPlugins.map(async (plugin) => {
@@ -210,7 +232,7 @@ export const pluginsRouter = router({
           category: plugin.category,
           homepage: plugin.homepage,
           tags: plugin.tags,
-          isDisabled: !enabledPlugins.includes(plugin.source),
+          isDisabled: !normalizedEnabled.includes(normalizeSource(plugin.source)),
           components: {
             commands,
             skills,

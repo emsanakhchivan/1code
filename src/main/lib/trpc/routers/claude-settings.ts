@@ -49,6 +49,10 @@ async function readClaudeSettings(): Promise<Record<string, unknown>> {
  * Plugins are DISABLED by default — only plugins explicitly in this list are active.
  * Returns empty array if no plugins have been enabled.
  * Results are cached for 5 seconds to reduce filesystem reads.
+ *
+ * Supports two formats:
+ * - Array: ["marketplace:plugin-name", ...]
+ * - Object: {"plugin-name@marketplace": true, ...} (Claude Code CLI format)
  */
 export async function getEnabledPlugins(): Promise<string[]> {
   // Return cached result if still valid
@@ -57,7 +61,17 @@ export async function getEnabledPlugins(): Promise<string[]> {
   }
 
   const settings = await readClaudeSettings()
-  const plugins = Array.isArray(settings.enabledPlugins) ? settings.enabledPlugins as string[] : []
+  const raw = settings.enabledPlugins
+  let plugins: string[] = []
+
+  if (Array.isArray(raw)) {
+    plugins = raw as string[]
+  } else if (raw && typeof raw === "object") {
+    // Claude Code CLI stores as {"plugin-name@marketplace": true}
+    plugins = Object.entries(raw as Record<string, unknown>)
+      .filter(([, v]) => v === true)
+      .map(([key]) => key)
+  }
 
   enabledPluginsCache = { plugins, timestamp: Date.now() }
   return plugins
@@ -146,6 +160,7 @@ export const claudeSettingsRouter = router({
   /**
    * Set a plugin's enabled state
    * Plugins are disabled by default — adding to enabledPlugins activates them.
+   * Preserves the existing format (array or object) in settings.json.
    */
   setPluginEnabled: publicProcedure
     .input(
@@ -156,18 +171,30 @@ export const claudeSettingsRouter = router({
     )
     .mutation(async ({ input }) => {
       const settings = await readClaudeSettings()
-      const enabledPlugins = Array.isArray(settings.enabledPlugins)
-        ? (settings.enabledPlugins as string[])
-        : []
+      const raw = settings.enabledPlugins
 
-      if (input.enabled && !enabledPlugins.includes(input.pluginSource)) {
-        enabledPlugins.push(input.pluginSource)
-      } else if (!input.enabled) {
-        const index = enabledPlugins.indexOf(input.pluginSource)
-        if (index > -1) enabledPlugins.splice(index, 1)
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+        // Object format: {"plugin-name@marketplace": true}
+        const map = raw as Record<string, unknown>
+        if (input.enabled) {
+          map[input.pluginSource] = true
+        } else {
+          delete map[input.pluginSource]
+        }
+      } else {
+        // Array format: ["marketplace:plugin-name", ...]
+        const enabledPlugins = Array.isArray(raw) ? (raw as string[]) : []
+
+        if (input.enabled && !enabledPlugins.includes(input.pluginSource)) {
+          enabledPlugins.push(input.pluginSource)
+        } else if (!input.enabled) {
+          const index = enabledPlugins.indexOf(input.pluginSource)
+          if (index > -1) enabledPlugins.splice(index, 1)
+        }
+
+        settings.enabledPlugins = enabledPlugins
       }
 
-      settings.enabledPlugins = enabledPlugins
       await writeClaudeSettings(settings)
       invalidateEnabledPluginsCache()
       return { success: true }
