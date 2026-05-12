@@ -374,18 +374,6 @@ export function AgentsPluginsTab() {
   const setPluginEnabledMutation = trpc.claudeSettings.setPluginEnabled.useMutation()
 
   const fetchPluginMutation = trpc.plugins.fetch.useMutation()
-  const handleFetchPlugin = useCallback(async () => {
-    if (!selectedPlugin?.source) return
-    try {
-      const result = await fetchPluginMutation.mutateAsync({ pluginSource: selectedPlugin.source })
-      if (result) {
-        toast.success("Plugin downloaded", { description: formatPluginName(result.name) })
-        await refetch()
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to download plugin")
-    }
-  }, [fetchPluginMutation, selectedPlugin, refetch])
 
   const filteredPlugins = useMemo(() => {
     if (!searchQuery.trim()) return plugins
@@ -437,6 +425,19 @@ export function AgentsPluginsTab() {
   })
 
   const selectedPlugin = plugins.find((p) => p.source === selectedPluginSource) || null
+
+  const handleFetchPlugin = useCallback(async () => {
+    if (!selectedPlugin?.source) return
+    try {
+      const result = await fetchPluginMutation.mutateAsync({ pluginSource: selectedPlugin.source })
+      if (result) {
+        toast.success("Plugin downloaded", { description: formatPluginName(result.name) })
+        await refetch()
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to download plugin")
+    }
+  }, [fetchPluginMutation, selectedPlugin, refetch])
 
   // Auto-select first plugin in display order (enabled first, then marketplace)
   useEffect(() => {
