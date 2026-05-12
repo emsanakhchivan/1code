@@ -8,6 +8,21 @@ import { discoverInstalledPlugins, getPluginComponentPaths } from "../../plugins
 import { resolveDirentType } from "../../fs/dirent"
 import { getEnabledPlugins } from "./claude-settings"
 
+/**
+ * Normalize a plugin source identifier to a canonical form for comparison.
+ * Handles: "marketplace:name" and "name@marketplace" (Claude Code CLI format).
+ */
+function normalizeSource(source: string): string {
+  if (source.includes(":")) return source
+  const atIdx = source.lastIndexOf("@")
+  if (atIdx > 0) {
+    const name = source.substring(0, atIdx)
+    const marketplace = source.substring(atIdx + 1)
+    return `${marketplace}:${name}`
+  }
+  return source
+}
+
 export interface FileCommand {
   name: string
   description: string
@@ -194,13 +209,14 @@ export const commandsRouter = router({
         )
       }
 
-      // Discover plugin commands
+      // Discover plugin commands (only enabled and already fetched plugins)
       const [enabledPluginSources, installedPlugins] = await Promise.all([
         getEnabledPlugins(),
         discoverInstalledPlugins(),
       ])
+      const normalizedEnabled = enabledPluginSources.map(normalizeSource)
       const enabledPlugins = installedPlugins.filter(
-        (p) => enabledPluginSources.includes(p.source),
+        (p) => normalizedEnabled.includes(normalizeSource(p.source)) && !p.needsFetch && p.path,
       )
       const pluginCommandsPromises = enabledPlugins.map(async (plugin) => {
         const paths = getPluginComponentPaths(plugin)
