@@ -348,9 +348,14 @@ export function buildAgentEnv(options: {
         ANTHROPIC_AUTH_TOKEN: options.profile.token,
         ANTHROPIC_BASE_URL: options.profile.baseUrl,
         ANTHROPIC_DEFAULT_MODEL: modelId,
-        // For non-claude models, set CUSTOM_MODEL_OPTION to bypass validation
+        // CRITICAL: Set all DEFAULT_*_MODEL env vars for built-in/user agents that use
+        // model aliases (haiku/sonnet/opus). Without this, aliases resolve to Claude's
+        // model IDs, but custom endpoints (GLM, etc.) don't have those models.
         ...(modelId && !modelId.toLowerCase().startsWith("claude-") && {
           ANTHROPIC_CUSTOM_MODEL_OPTION: modelId,
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: modelId,
+          ANTHROPIC_DEFAULT_SONNET_MODEL: modelId,
+          ANTHROPIC_DEFAULT_OPUS_MODEL: modelId,
         }),
       }
     }
@@ -362,6 +367,8 @@ export function buildAgentEnv(options: {
       OPENAI_BASE_URL: options.profile.baseUrl,
       OPENAI_API_KEY: options.profile.token,
       OPENAI_MODEL: modelId,
+      // For openai-compatible, getDefaultHaikuModel() returns OPENAI_MODEL
+      // so haiku alias automatically resolves to the configured model
     }
   }
 
