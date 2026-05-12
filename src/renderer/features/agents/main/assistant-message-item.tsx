@@ -516,9 +516,11 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
   const { nestedToolsMap, nestedToolIds, orphanTaskGroups, orphanToolCallIds, orphanFirstToolCallIds } = useMemo(() => {
     const nestedToolsMap = new Map<string, any[]>()
     const nestedToolIds = new Set<string>()
-    const taskPartIds = new Set(
+    // Track parent tool IDs - includes both Task and Agent tools for nested grouping
+    // Agent tools spawn subagents (Explore, Plan, general-purpose, etc.)
+    const parentPartIds = new Set(
       messageParts
-        .filter((p: any) => p.type === "tool-Task" && p.toolCallId)
+        .filter((p: any) => (p.type === "tool-Task" || p.type === "tool-Agent") && p.toolCallId)
         .map((p: any) => p.toolCallId)
     )
     const orphanTaskGroups = new Map<string, { parts: any[]; firstToolCallId: string }>()
@@ -528,7 +530,7 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
     for (const part of messageParts) {
       if (part.toolCallId?.includes(":")) {
         const parentId = part.toolCallId.split(":")[0]
-        if (taskPartIds.has(parentId)) {
+        if (parentPartIds.has(parentId)) {
           if (!nestedToolsMap.has(parentId)) {
             nestedToolsMap.set(parentId, [])
           }
@@ -699,6 +701,12 @@ export const AssistantMessageItem = memo(function AssistantMessageItem({
     }
 
     if (part.type === "tool-Task") {
+      const nestedTools = nestedToolsMap.get(part.toolCallId) || []
+      return <AgentTaskTool key={idx} part={part} nestedTools={nestedTools} chatStatus={status} />
+    }
+
+    // Agent tool (subagent spawning) - same nested tools handling as Task
+    if (part.type === "tool-Agent") {
       const nestedTools = nestedToolsMap.get(part.toolCallId) || []
       return <AgentTaskTool key={idx} part={part} nestedTools={nestedTools} chatStatus={status} />
     }
