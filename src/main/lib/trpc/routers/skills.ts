@@ -145,12 +145,19 @@ const listSkillsProcedure = publicProcedure
     const enabledPlugins = installedPlugins.filter(
       (p) => normalizedEnabled.includes(normalizeSource(p.source)) && !p.needsFetch && p.path,
     )
+    console.log("[skills] enabledPluginSources:", enabledPluginSources)
+    console.log("[skills] normalizedEnabled:", normalizedEnabled)
+    console.log("[skills] installedPlugins count:", installedPlugins.length)
+    console.log("[skills] enabledPlugins (matched):", enabledPlugins.length, enabledPlugins.map(p => p.name))
     const pluginSkillsPromises = enabledPlugins.map(async (plugin) => {
       const paths = getPluginComponentPaths(plugin)
+      console.log("[skills] scanning plugin:", plugin.name, "skillsDir:", paths.skills)
       try {
         const skills = await scanSkillsDirectory(paths.skills, "plugin")
+        console.log("[skills] found", skills.length, "skills for plugin", plugin.name)
         return skills.map((skill) => ({ ...skill, pluginName: plugin.source }))
-      } catch {
+      } catch (err) {
+        console.error("[skills] error scanning plugin", plugin.name, err)
         return []
       }
     })
@@ -163,6 +170,7 @@ const listSkillsProcedure = publicProcedure
         ...pluginSkillsPromises,
       ])
     const pluginSkills = pluginSkillsArrays.flat()
+    console.log("[skills] total: user=", userSkills.length, "project=", projectSkills.length, "plugin=", pluginSkills.length)
 
     return [...projectSkills, ...userSkills, ...pluginSkills]
   })
